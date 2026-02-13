@@ -14,6 +14,22 @@ const TUNNEL_PORT = process.env.TUNNEL_PORT;
 const HTTP_PORT = process.env.HTTP_PORT;
 
 let espWebSocket = null;
+let espConnected = false;
+const sseClients = new Set();
+
+/* ================= LOGGING ================= */
+
+function log(level, ...args) {
+  const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 19);
+  console.log(`[${timestamp}] [${level}]`, ...args);
+}
+
+const logger = {
+  error: (...args) => log('ERROR', ...args),
+  warn: (...args) => log('WARN', ...args),
+  info: (...args) => log('INFO', ...args),
+  debug: (...args) => log('DEBUG', ...args)
+};
 
 /* ================= HMAC VALIDATION ================= */
 
@@ -23,7 +39,7 @@ function validateHMAC(token, hmac) {
     .update(token)
     .digest('hex');
 
-  console.log(`HMAC validation: Received=${hmac.substring(0, 16)}..., Expected=${calculatedHMAC.substring(0, 16)}...`);
+  logger.debug(`HMAC validation: Received=${hmac.substring(0, 16)}..., Expected=${calculatedHMAC.substring(0, 16)}...`);
 
   return calculatedHMAC === hmac;
 }
@@ -31,7 +47,7 @@ function validateHMAC(token, hmac) {
 function validateTimestamp(token) {
   const match = token.match(/esp32-(\d+)/);
   if (!match) {
-    console.log("Token format invalid:", token);
+    logger.error("Token format invalid:", token);
     return false;
   }
 
@@ -39,11 +55,11 @@ function validateTimestamp(token) {
   const now = Math.floor(Date.now() / 1000);
   const diff = Math.abs(now - timestamp);
 
-  console.log(`Timestamp validation: ESP=${timestamp}, Server=${now}, Diff=${diff}s`);
+  logger.debug(`Timestamp validation: ESP=${timestamp}, Server=${now}, Diff=${diff}s`);
 
   // Aceita até 5 minutos de diferença
   if (diff >= 300) {
-    console.log(`⚠️ Timestamp difference too large (${diff}s). Check ESP32 NTP sync.`);
+    logger.warn(`Timestamp difference too large (${diff}s). Check ESP32 NTP sync.`);
     return false;
   }
   
@@ -239,6 +255,29 @@ h1 {
   color: #4CAF50;
 }
 
+.esp-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.esp-status.online {
+  background: rgba(34, 197, 94, 0.15);
+  border: 1px solid rgba(34, 197, 94, 0.3);
+  color: #4ade80;
+}
+
+.esp-status.offline {
+  background: rgba(239, 68, 68, 0.15);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: #f87171;
+}
+
 .status {
   display: flex;
   align-items: center;
@@ -342,6 +381,11 @@ button .icon {
       <h1>⚡ Wake-on-LAN</h1>
       <p class="subtitle">Controle de dispositivos remotos</p>
       
+      <div id="espStatus" class="esp-status offline">
+        <div class="status-dot"></div>
+        <span id="espStatusText">ESP32: Desconectado</span>
+      </div>
+
       <div class="device-info">
         <label>Endereço MAC</label>
         <div class="mac">A8:A1:59:98:61:0E</div>
@@ -352,7 +396,7 @@ button .icon {
         <span>Aguardando ação...</span>
       </div>
 
-      <button id="wolBtn" onclick="sendWOL()">
+      <button id="wolBtn" onclick="sendWOL()" disabled>
         <span class="icon">🚀</span>
         Ligar Dispositivo
       </button>
@@ -364,6 +408,30 @@ button .icon {
   </div>
 
   <script>
+    // Conectar ao SSE para status do ESP
+    const eventSource = new EventSource('/api/status');
+    
+    eventSource.addEventListener('status', (event) => {
+      const data = JSON.parse(event.data);
+      const espStatus = document.getElementById('espStatus');
+      const espStatusText = document.getElementById('espStatusText');
+      const wolBtn = document.getElementById('wolBtn');
+      
+      if (data.connected) {
+        espStatus.className = 'esp-status online';
+        espStatusText.textContent = 'ESP32: Conectado';
+        wolBtn.disabled = false;
+      } else {
+        espStatus.className = 'esp-status offline';
+        espStatusText.textContent = 'ESP32: Desconectado';
+        wolBtn.disabled = true;
+      }
+    });
+    
+    eventSource.onerror = () => {
+      console.error('SSE connection error');
+    };
+
     async function sendWOL() {
       const btn = document.getElementById('wolBtn');
       const status = document.getElementById('status');
@@ -404,15 +472,22 @@ button .icon {
 const wss = new WebSocket.Server({ port: TUNNEL_PORT });
 
 wss.on('connection', (ws) => {
-  console.log("Incoming ESP WebSocket connection...");
+  logger.info("Incoming ESP WebSocket connection...");
   
   let authenticated = false;
+  let pingInterval = null;
   let authTimeout = setTimeout(() => {
     if (!authenticated) {
-      console.log("❌ Authentication timeout - no valid auth received in 10s");
+      logger.warn("Authentication timeout - no valid auth received in 10s");
       ws.close();
     }
   }, 10000); // 10 segundos para autenticar
+  
+  // Configurar ping/pong
+  ws.isAlive = true;
+  ws.on('pong', () => {
+    ws.isAlive = true;
+  });
 
   ws.on('message', (message) => {
     const data = message.toString();
@@ -422,59 +497,92 @@ wss.on('connection', (ws) => {
         const auth = JSON.parse(data);
         const { token, hmac } = auth;
 
-        console.log(`Auth attempt: token="${token}"`);
+        logger.debug(`Auth attempt: token="${token}"`);
 
         if (!token || !hmac) {
-          console.log("❌ Missing token or hmac");
+          logger.error("Missing token or hmac");
           ws.close();
           return;
         }
 
         // Valida timestamp primeiro (mais fácil de diagnosticar)
         if (!validateTimestamp(token)) {
-          console.log("❌ Invalid or expired timestamp");
+          logger.error("Invalid or expired timestamp");
           ws.close();
           return;
         }
 
         // Valida HMAC
         if (!validateHMAC(token, hmac)) {
-          console.log("❌ Invalid HMAC");
+          logger.error("Invalid HMAC");
           ws.close();
           return;
         }
 
-        console.log("✅ ESP authenticated successfully");
+        logger.info("ESP authenticated successfully");
         authenticated = true;
         clearTimeout(authTimeout);
         espWebSocket = ws;
+        espConnected = true;
+        notifyStatusChange();
+        
+        // Iniciar ping a cada 10 segundos
+        pingInterval = setInterval(() => {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.isAlive = false;
+            ws.ping();
+            
+            // Verificar se respondeu ao ping anterior
+            setTimeout(() => {
+              if (!ws.isAlive && ws.readyState === WebSocket.OPEN) {
+                logger.warn("ESP not responding to ping, terminating connection");
+                ws.terminate();
+              }
+            }, 5000); // 5s para responder
+          }
+        }, 10000); // ping a cada 10s
 
       } catch (e) {
-        console.log("❌ Invalid auth JSON:", data);
-        console.log("Error:", e.message);
+        logger.error("Invalid auth JSON:", data);
+        logger.error("Error:", e.message);
         ws.close();
       }
     }
   });
 
   ws.on('close', () => {
-    console.log("ESP disconnected");
+    logger.info("ESP disconnected");
     clearTimeout(authTimeout);
+    if (pingInterval) clearInterval(pingInterval);
     if (espWebSocket === ws) {
       espWebSocket = null;
+      espConnected = false;
+      notifyStatusChange();
     }
   });
 
   ws.on('error', (err) => {
-    console.log("ESP WebSocket error:", err.message);
+    logger.error("ESP WebSocket error:", err.message);
     clearTimeout(authTimeout);
+    if (pingInterval) clearInterval(pingInterval);
     if (espWebSocket === ws) {
       espWebSocket = null;
+      espConnected = false;
+      notifyStatusChange();
     }
   });
 });
 
-console.log(`WebSocket tunnel listening on ${TUNNEL_PORT}`);
+/* ================= SSE STATUS NOTIFICATIONS ================= */
+
+function notifyStatusChange() {
+  const statusData = JSON.stringify({ connected: espConnected });
+  sseClients.forEach(client => {
+    client.write(`event: status\ndata: ${statusData}\n\n`);
+  });
+}
+
+logger.info(`WebSocket tunnel listening on ${TUNNEL_PORT}`);
 
 /* ================= HTTP SERVER ================= */
 
@@ -516,6 +624,34 @@ const httpServer = http.createServer((req, res) => {
 
       res.writeHead(401);
       res.end("Invalid login");
+    });
+
+    return;
+  }
+
+  // SSE STATUS ENDPOINT (needs auth)
+  if (req.url === "/api/status" && req.method === "GET") {
+    if (!checkJWT(req)) {
+      res.writeHead(401);
+      return res.end("Unauthorized");
+    }
+
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive'
+    });
+
+    // Enviar status inicial
+    const initialStatus = JSON.stringify({ connected: espConnected });
+    res.write(`event: status\ndata: ${initialStatus}\n\n`);
+
+    // Adicionar cliente à lista
+    sseClients.add(res);
+
+    // Remover quando desconectar
+    req.on('close', () => {
+      sseClients.delete(res);
     });
 
     return;
@@ -590,5 +726,5 @@ const httpServer = http.createServer((req, res) => {
 });
 
 httpServer.listen(HTTP_PORT, () => {
-  console.log(`HTTP listening on ${HTTP_PORT}`);
+  logger.info(`HTTP listening on ${HTTP_PORT}`);
 });
