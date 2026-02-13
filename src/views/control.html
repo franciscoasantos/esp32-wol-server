@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Wake-on-LAN Control</title>
+
+<style>
+* {
+  box-sizing: border-box;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+body {
+  margin: 0;
+  background: linear-gradient(135deg, #0f172a, #020617);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 16px;
+}
+
+.container {
+  width: 100%;
+  max-width: 480px;
+}
+
+.card {
+  padding: 32px;
+  background: rgba(255,255,255,0.05);
+  backdrop-filter: blur(12px);
+  border-radius: 14px;
+  box-shadow: 0 10px 40px rgba(0,0,0,0.4);
+}
+
+h1 {
+  margin: 0 0 8px 0;
+  text-align: center;
+  font-size: 26px;
+}
+
+.subtitle {
+  text-align: center;
+  opacity: 0.7;
+  margin-bottom: 24px;
+  font-size: 14px;
+}
+
+.device-info {
+  background: rgba(255,255,255,0.08);
+  padding: 16px;
+  border-radius: 10px;
+  margin-bottom: 24px;
+}
+
+.device-info label {
+  display: block;
+  font-size: 12px;
+  opacity: 0.7;
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.device-info .mac {
+  font-family: 'Courier New', monospace;
+  font-size: 18px;
+  font-weight: 600;
+  color: #4CAF50;
+}
+
+.esp-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.esp-status.online {
+  background: rgba(34, 197, 94, 0.15);
+  border: 1px solid rgba(34, 197, 94, 0.3);
+  color: #4ade80;
+}
+
+.esp-status.offline {
+  background: rgba(239, 68, 68, 0.15);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: #f87171;
+}
+
+.status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+  font-size: 14px;
+}
+
+.status.info {
+  background: rgba(59, 130, 246, 0.15);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  color: #60a5fa;
+}
+
+.status.success {
+  background: rgba(34, 197, 94, 0.15);
+  border: 1px solid rgba(34, 197, 94, 0.3);
+  color: #4ade80;
+}
+
+.status.error {
+  background: rgba(239, 68, 68, 0.15);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: #f87171;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+button {
+  width: 100%;
+  padding: 14px;
+  border: none;
+  border-radius: 10px;
+  font-size: 16px;
+  font-weight: 600;
+  background: linear-gradient(135deg, #4CAF50, #43a047);
+  color: white;
+  cursor: pointer;
+  transition: all 0.2s;
+  box-shadow: 0 4px 12px rgba(76, 175, 80, 0.3);
+}
+
+button:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(76, 175, 80, 0.4);
+}
+
+button:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+button .icon {
+  margin-right: 8px;
+}
+
+.logout {
+  margin-top: 16px;
+  text-align: center;
+}
+
+.logout a {
+  color: rgba(255,255,255,0.6);
+  text-decoration: none;
+  font-size: 14px;
+  transition: color 0.2s;
+}
+
+.logout a:hover {
+  color: rgba(255,255,255,0.9);
+}
+
+@media (max-width: 420px) {
+  .card {
+    padding: 24px;
+  }
+}
+</style>
+</head>
+
+<body>
+  <div class="container">
+    <div class="card">
+      <h1>⚡ Wake-on-LAN</h1>
+      <p class="subtitle">Controle de dispositivos remotos</p>
+      
+      <div id="espStatus" class="esp-status offline">
+        <div class="status-dot"></div>
+        <span id="espStatusText">ESP32: Desconectado</span>
+      </div>
+
+      <div class="device-info">
+        <label>Endereço MAC</label>
+        <div class="mac">A8:A1:59:98:61:0E</div>
+      </div>
+
+      <div id="status" class="status info">
+        <div class="status-dot"></div>
+        <span>Aguardando ação...</span>
+      </div>
+
+      <button id="wolBtn" onclick="sendWOL()" disabled>
+        <span class="icon">🚀</span>
+        Ligar Dispositivo
+      </button>
+
+      <div class="logout">
+        <a href="/logout">Sair</a>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Conectar ao SSE para status do ESP
+    const eventSource = new EventSource('/api/status');
+    
+    eventSource.addEventListener('status', (event) => {
+      const data = JSON.parse(event.data);
+      const espStatus = document.getElementById('espStatus');
+      const espStatusText = document.getElementById('espStatusText');
+      const wolBtn = document.getElementById('wolBtn');
+      
+      if (data.connected) {
+        espStatus.className = 'esp-status online';
+        espStatusText.textContent = 'ESP32: Conectado';
+        wolBtn.disabled = false;
+      } else {
+        espStatus.className = 'esp-status offline';
+        espStatusText.textContent = 'ESP32: Desconectado';
+        wolBtn.disabled = true;
+      }
+    });
+    
+    eventSource.onerror = () => {
+      console.error('SSE connection error');
+    };
+
+    async function sendWOL() {
+      const btn = document.getElementById('wolBtn');
+      const status = document.getElementById('status');
+      
+      btn.disabled = true;
+      status.className = 'status info';
+      status.innerHTML = '<div class="status-dot"></div><span>Enviando comando...</span>';
+
+      try {
+        const response = await fetch('/wol', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mac: 'A8:A1:59:98:61:0E' })
+        });
+
+        const data = await response.json();
+
+        if (response.ok && data.status === 'ok') {
+          status.className = 'status success';
+          status.innerHTML = '<div class="status-dot"></div><span>&#x2705; Comando enviado com sucesso!</span>';
+        } else {
+          throw new Error(data.error || 'Erro desconhecido');
+        }
+      } catch (error) {
+        status.className = 'status error';
+        status.innerHTML = '<div class="status-dot"></div><span>&#x274C; ' + error.message + '</span>';
+      } finally {
+        btn.disabled = false;
+      }
+    }
+  </script>
+</body>
+</html>

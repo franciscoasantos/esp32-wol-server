@@ -222,13 +222,41 @@ Envia comando Wake-on-LAN via ESP32.
 ```
 esp32-wol-server/
 ├── src/
-│   └── server.js      # Servidor principal
-├── package.json       # Dependências do projeto
-├── .env              # Variáveis de ambiente (não commitar!)
-├── .env.example      # Exemplo de configuração
-├── .gitignore        # Arquivos ignorados pelo git
-└── README.md         # Este arquivo
+│   ├── server.js              # Ponto de entrada principal
+│   ├── config.js              # Configurações e variáveis de ambiente
+│   ├── auth/                  # Módulos de autenticação
+│   │   ├── jwt.js            # Autenticação JWT
+│   │   └── hmac.js           # Validação HMAC para ESP32
+│   ├── routes/               # Handlers de rotas HTTP
+│   │   ├── auth.js           # Rotas de autenticação (login/logout)
+│   │   └── api.js            # Rotas da API (status/WOL)
+│   ├── utils/                # Utilitários
+│   │   ├── logger.js         # Sistema de logging
+│   │   └── sse.js            # Server-Sent Events
+│   ├── views/                # Arquivos HTML
+│   │   ├── login.html        # Página de login
+│   │   ├── control.html      # Página de controle
+│   │   └── index.js          # Carregador de views
+│   └── websocket/            # WebSocket
+│       └── espTunnel.js      # Túnel WebSocket para ESP32
+├── package.json              # Dependências do projeto
+├── .env                      # Variáveis de ambiente (não commitar!)
+├── .env.example              # Exemplo de configuração
+├── .gitignore                # Arquivos ignorados pelo git
+└── README.md                 # Este arquivo
 ```
+
+### Arquitetura Modular
+
+O projeto foi organizado seguindo princípios de separação de responsabilidades:
+
+- **auth/**: Módulos de autenticação isolados (JWT para web, HMAC para ESP)
+- **routes/**: Handlers de rotas HTTP separados por domínio
+- **utils/**: Utilitários compartilhados (logging, SSE)
+- **views/**: Arquivos HTML estáticos separados do código
+- **websocket/**: Lógica do túnel WebSocket encapsulada
+- **config.js**: Centralização de configurações
+- **server.js**: Orquestração e inicialização (~70 linhas)
 
 ## 🔒 Segurança
 
