@@ -83,18 +83,15 @@ function initializeTunnel() {
           
           // Iniciar ping a cada 10 segundos
           pingInterval = setInterval(() => {
-            if (ws.readyState === WebSocket.OPEN) {
-              ws.isAlive = false;
-              ws.ping();
-              
-              // Verificar se respondeu ao ping anterior
-              setTimeout(() => {
-                if (!ws.isAlive && ws.readyState === WebSocket.OPEN) {
-                  logger.warn("ESP not responding to ping, terminating connection");
-                  ws.terminate();
-                }
-              }, 5000); // 5s para responder
+            if (!ws.isAlive) {
+              // Não respondeu ao ping anterior, terminar conexão
+              logger.warn("ESP not responding to ping, terminating connection");
+              return ws.terminate();
             }
+            
+            // Ping anterior foi respondido, enviar próximo ping
+            ws.isAlive = false;
+            ws.ping();
           }, 10000); // ping a cada 10s
 
         } catch (e) {
