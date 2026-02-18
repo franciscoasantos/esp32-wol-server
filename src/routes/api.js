@@ -29,9 +29,15 @@ function handleStatus(req, res) {
 }
 
 function handleWOL(req, res) {
+  // Verificar se ESP está conectado e autenticado
+  if (!isESPConnected()) {
+    res.writeHead(503, { "Content-Type": "application/json" });
+    return res.end(JSON.stringify({ error: "ESP offline" }));
+  }
+  
   const espWebSocket = getESPWebSocket();
   
-  // Check ESP connection
+  // Verificar estado do WebSocket
   if (!espWebSocket || espWebSocket.readyState !== WebSocket.OPEN) {
     res.writeHead(503, { "Content-Type": "application/json" });
     return res.end(JSON.stringify({ error: "ESP offline" }));
