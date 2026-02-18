@@ -1,5 +1,6 @@
 function log(level, ...args) {
-  const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 19);
+  const now = new Date();
+  const timestamp = now.toLocaleDateString() + ' ' + now.toLocaleTimeString();
   console.log(`[${timestamp}] [${level}]`, ...args);
 }
 
