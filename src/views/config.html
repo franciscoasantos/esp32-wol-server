@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Configuração de Clientes</title>
+<style>
+* { box-sizing: border-box; font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif; }
+body { margin: 0; background: linear-gradient(135deg, #0f172a, #020617); color: white; display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 16px; }
+.container { width: 100%; max-width: 700px; }
+.card { padding: 28px; background: rgba(255,255,255,0.05); backdrop-filter: blur(12px); border-radius: 14px; box-shadow: 0 10px 40px rgba(0,0,0,0.4); }
+h1 { margin: 0 0 8px; font-size: 26px; }
+.subtitle { opacity: 0.7; margin-bottom: 20px; font-size: 14px; }
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.field { margin-bottom: 12px; }
+label { display: block; font-size: 12px; opacity: 0.8; margin-bottom: 6px; text-transform: uppercase; letter-spacing: .4px; }
+input, select { width: 100%; padding: 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.2); background: rgba(255,255,255,0.08); color: white; }
+option { color: #111; }
+.clients { background: rgba(255,255,255,0.08); border-radius: 8px; padding: 12px; margin-bottom: 16px; max-height: 180px; overflow: auto; }
+.client-item { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; padding: 8px; border-radius: 8px; background: rgba(255,255,255,0.06); }
+.client-item button { width: auto; padding: 6px 10px; font-size: 13px; border-radius: 8px; background: rgba(255,255,255,0.2); }
+.status { display: flex; align-items: center; gap: 8px; padding: 12px; border-radius: 8px; margin: 16px 0; font-size: 14px; }
+.status.info { background: rgba(59,130,246,.15); border: 1px solid rgba(59,130,246,.3); color: #60a5fa; }
+.status.success { background: rgba(34,197,94,.15); border: 1px solid rgba(34,197,94,.3); color: #4ade80; }
+.status.error { background: rgba(239,68,68,.15); border: 1px solid rgba(239,68,68,.3); color: #f87171; }
+.status-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+button { width: 100%; padding: 14px; border: none; border-radius: 10px; font-size: 16px; font-weight: 600; background: linear-gradient(135deg, #4CAF50, #43a047); color: white; cursor: pointer; }
+.secondary-btn { width: auto; padding: 10px 12px; font-size: 14px; border-radius: 8px; background: rgba(255,255,255,0.2); }
+.discovered-row { display: flex; gap: 8px; align-items: end; }
+.discovered-row select { flex: 1; }
+.links { margin-top: 14px; text-align: center; display: flex; justify-content: center; gap: 14px; }
+.links a { color: rgba(255,255,255,.75); text-decoration: none; font-size: 14px; }
+@media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+  <div class="container">
+    <div class="card">
+      <h1>⚙️ Configuração de Clientes</h1>
+      <p class="subtitle">Cadastre cada ESP32 por MAC, defina apelido, quantidade de LEDs e pino da fita</p>
+
+      <div class="clients" id="clientsList">Carregando clientes...</div>
+
+      <form id="clientForm">
+        <div class="field">
+          <label for="discoveredSelect">Novo ESP32 detectado (não cadastrado)</label>
+          <div class="discovered-row">
+            <select id="discoveredSelect"></select>
+            <button type="button" class="secondary-btn" onclick="useDiscovered()">Usar</button>
+          </div>
+        </div>
+
+        <div class="grid">
+          <div class="field">
+            <label for="espMac">MAC do ESP32</label>
+            <input id="espMac" placeholder="Selecione um ESP detectado" required readonly />
+          </div>
+          <div class="field">
+            <label for="nickname">Apelido</label>
+            <input id="nickname" placeholder="Sala / Quarto / Oficina" required />
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="ledCount">Quantidade de LEDs</label>
+          <input id="ledCount" type="number" min="1" max="2048" value="30" required />
+        </div>
+
+        <div class="field">
+          <label for="ledPin">Pino do ESP32 para LED</label>
+          <input id="ledPin" type="number" min="0" max="48" value="2" required />
+        </div>
+
+        <div id="status" class="status info">
+          <div class="status-dot"></div>
+          <span>Preencha os dados e salve.</span>
+        </div>
+
+        <button type="submit">Salvar Cliente</button>
+      </form>
+
+      <div class="links">
+        <a href="/">Wake-on-LAN</a>
+        <a href="/led">Controle de LED</a>
+        <a href="/wol-targets">MACs WoL</a>
+        <a href="/logout">Sair</a>
+      </div>
+    </div>
+  </div>
+
+<script>
+  const clientsList = document.getElementById('clientsList');
+  const form = document.getElementById('clientForm');
+  const status = document.getElementById('status');
+
+  const espMacInput = document.getElementById('espMac');
+  const nicknameInput = document.getElementById('nickname');
+  const ledCountInput = document.getElementById('ledCount');
+  const ledPinInput = document.getElementById('ledPin');
+  const discoveredSelect = document.getElementById('discoveredSelect');
+
+  let clients = [];
+  let discoveredClients = [];
+
+  function setStatus(type, message) {
+    status.className = `status ${type}`;
+    status.innerHTML = `<div class="status-dot"></div><span>${message}</span>`;
+  }
+
+  function loadIntoForm(client) {
+    espMacInput.value = client.espMac || '';
+    nicknameInput.value = client.nickname || '';
+    ledCountInput.value = client.ledCount || 30;
+    ledPinInput.value = Number.isInteger(client.ledPin) ? client.ledPin : 2;
+  }
+
+  function renderClientsList() {
+    if (!clients.length) {
+      clientsList.textContent = 'Nenhum cliente cadastrado.';
+      return;
+    }
+
+    clientsList.innerHTML = clients
+      .map((client) => {
+        const online = client.connected ? 'online' : 'offline';
+        return `
+          <div class="client-item">
+            <span>${client.nickname} (${client.espMac}) • LEDs ${client.ledCount} • PIN ${Number.isInteger(client.ledPin) ? client.ledPin : '-'} • ${online}</span>
+            <button type="button" onclick="selectClient('${client.espMac}')">Editar</button>
+          </div>
+        `;
+      })
+      .join('');
+  }
+
+  function renderDiscoveredList() {
+    if (!discoveredClients.length) {
+      discoveredSelect.innerHTML = '<option value="">Nenhum novo ESP detectado</option>';
+      discoveredSelect.disabled = true;
+      return;
+    }
+
+    discoveredSelect.disabled = false;
+    discoveredSelect.innerHTML = discoveredClients
+      .map((item) => `<option value="${item.espMac}">${item.espMac} • ${item.ip || 'IP desconhecido'}</option>`)
+      .join('');
+  }
+
+  async function loadClients() {
+    const response = await fetch('/api/clients');
+    const data = await response.json();
+    clients = data.clients || [];
+    renderClientsList();
+  }
+
+  async function loadDiscoveredClients() {
+    const response = await fetch('/api/clients/discovered');
+    const data = await response.json();
+    discoveredClients = data.discovered || [];
+    renderDiscoveredList();
+  }
+
+  window.useDiscovered = function useDiscovered() {
+    const selectedMac = discoveredSelect.value;
+    if (!selectedMac) return;
+    espMacInput.value = selectedMac;
+    setStatus('info', `ESP ${selectedMac} selecionado para cadastro`);
+  };
+
+  window.selectClient = function selectClient(espMac) {
+    const client = clients.find((item) => item.espMac === espMac);
+    if (!client) return;
+    loadIntoForm(client);
+    setStatus('info', `Editando cliente ${client.nickname}`);
+  };
+
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+
+    const payload = {
+      espMac: espMacInput.value.trim(),
+      nickname: nicknameInput.value.trim(),
+      ledCount: Number.parseInt(ledCountInput.value, 10),
+      ledPin: Number.parseInt(ledPinInput.value, 10)
+    };
+
+    setStatus('info', 'Salvando cliente...');
+
+    try {
+      const response = await fetch('/api/clients', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || 'Erro ao salvar');
+      }
+
+      setStatus('success', `Cliente ${data.client.nickname} salvo com sucesso!`);
+      if (espMacInput.value === payload.espMac) {
+        espMacInput.value = '';
+      }
+      await loadClients();
+      await loadDiscoveredClients();
+    } catch (error) {
+      setStatus('error', `❌ ${error.message}`);
+    }
+  });
+
+  loadClients();
+  loadDiscoveredClients();
+
+  const eventSource = new EventSource('/api/status');
+  eventSource.addEventListener('status', () => {
+    loadDiscoveredClients();
+  });
+</script>
+</body>
+</html>

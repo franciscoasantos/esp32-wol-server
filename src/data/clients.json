@@ -1,0 +1,20 @@
+{
+  "clients": [
+    {
+      "espMac": "7C:87:CE:28:09:68",
+      "nickname": "Mesa do escritório",
+      "ledCount": 90,
+      "ledPin": 13,
+      "updatedAt": "2026-02-28T22:57:02.511Z",
+      "createdAt": "2026-02-28T22:10:39.053Z"
+    },
+    {
+      "espMac": "AC:67:B2:3B:D2:68",
+      "nickname": "Sala",
+      "ledCount": 300,
+      "ledPin": 13,
+      "updatedAt": "2026-02-28T22:19:26.317Z",
+      "createdAt": "2026-02-28T22:10:56.268Z"
+    }
+  ]
+}

@@ -3,7 +3,7 @@ const cookie = require('cookie');
 const { JWT_SECRET } = require('../config');
 
 function generateToken(user) {
-  return jwt.sign({ user }, JWT_SECRET, { expiresIn: '2h' });
+  return jwt.sign({ user }, JWT_SECRET, { expiresIn: '7d' });
 }
 
 function checkJWT(req) {

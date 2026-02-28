@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cadastro de MAC WoL</title>
+<style>
+* { box-sizing: border-box; font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif; }
+body { margin: 0; background: linear-gradient(135deg, #0f172a, #020617); color: white; display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 16px; }
+.container { width: 100%; max-width: 700px; }
+.card { padding: 28px; background: rgba(255,255,255,0.05); backdrop-filter: blur(12px); border-radius: 14px; box-shadow: 0 10px 40px rgba(0,0,0,0.4); }
+h1 { margin: 0 0 8px; font-size: 26px; }
+.subtitle { opacity: 0.7; margin-bottom: 20px; font-size: 14px; }
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.field { margin-bottom: 12px; }
+label { display: block; font-size: 12px; opacity: 0.8; margin-bottom: 6px; text-transform: uppercase; letter-spacing: .4px; }
+input { width: 100%; padding: 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.2); background: rgba(255,255,255,0.08); color: white; }
+.targets { background: rgba(255,255,255,0.08); border-radius: 8px; padding: 12px; margin-bottom: 16px; max-height: 220px; overflow: auto; }
+.target-item { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; padding: 8px; border-radius: 8px; background: rgba(255,255,255,0.06); }
+.target-item button { width: auto; padding: 6px 10px; font-size: 13px; border-radius: 8px; background: rgba(255,255,255,0.2); }
+.status { display: flex; align-items: center; gap: 8px; padding: 12px; border-radius: 8px; margin: 16px 0; font-size: 14px; }
+.status.info { background: rgba(59,130,246,.15); border: 1px solid rgba(59,130,246,.3); color: #60a5fa; }
+.status.success { background: rgba(34,197,94,.15); border: 1px solid rgba(34,197,94,.3); color: #4ade80; }
+.status.error { background: rgba(239,68,68,.15); border: 1px solid rgba(239,68,68,.3); color: #f87171; }
+.status-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+button { width: 100%; padding: 14px; border: none; border-radius: 10px; font-size: 16px; font-weight: 600; background: linear-gradient(135deg, #4CAF50, #43a047); color: white; cursor: pointer; }
+.links { margin-top: 14px; text-align: center; display: flex; justify-content: center; gap: 14px; }
+.links a { color: rgba(255,255,255,.75); text-decoration: none; font-size: 14px; }
+@media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+  <div class="container">
+    <div class="card">
+      <h1>📝 Cadastro MAC WoL</h1>
+      <p class="subtitle">Cadastre os MAC addresses dos dispositivos que podem receber Wake-on-LAN</p>
+
+      <div class="targets" id="targetsList">Carregando alvos WoL...</div>
+
+      <form id="targetForm">
+        <div class="grid">
+          <div class="field">
+            <label for="nickname">Apelido</label>
+            <input id="nickname" placeholder="PC Sala / NAS / Servidor" required />
+          </div>
+          <div class="field">
+            <label for="mac">MAC address</label>
+            <input id="mac" placeholder="AA:BB:CC:DD:EE:FF" required />
+          </div>
+        </div>
+
+        <div id="status" class="status info">
+          <div class="status-dot"></div>
+          <span>Preencha os dados e salve.</span>
+        </div>
+
+        <button type="submit">Salvar MAC WoL</button>
+      </form>
+
+      <div class="links">
+        <a href="/">Wake-on-LAN</a>
+        <a href="/led">Controle de LED</a>
+        <a href="/config">Configuração</a>
+        <a href="/logout">Sair</a>
+      </div>
+    </div>
+  </div>
+
+<script>
+  const targetsList = document.getElementById('targetsList');
+  const form = document.getElementById('targetForm');
+  const status = document.getElementById('status');
+  const nicknameInput = document.getElementById('nickname');
+  const macInput = document.getElementById('mac');
+
+  let targets = [];
+
+  function setStatus(type, message) {
+    status.className = `status ${type}`;
+    status.innerHTML = `<div class="status-dot"></div><span>${message}</span>`;
+  }
+
+  function renderTargets() {
+    if (!targets.length) {
+      targetsList.textContent = 'Nenhum MAC WoL cadastrado.';
+      return;
+    }
+
+    targetsList.innerHTML = targets.map((target) => `
+      <div class="target-item">
+        <span>${target.nickname} (${target.mac})</span>
+        <button type="button" onclick="editTarget('${target.mac}')">Editar</button>
+      </div>
+    `).join('');
+  }
+
+  async function loadTargets() {
+    const response = await fetch('/api/wol-targets');
+    const data = await response.json();
+    targets = data.targets || [];
+    renderTargets();
+  }
+
+  window.editTarget = function editTarget(mac) {
+    const target = targets.find((item) => item.mac === mac);
+    if (!target) return;
+
+    nicknameInput.value = target.nickname;
+    macInput.value = target.mac;
+    setStatus('info', `Editando ${target.nickname}`);
+  };
+
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+
+    const payload = {
+      nickname: nicknameInput.value.trim(),
+      mac: macInput.value.trim()
+    };
+
+    setStatus('info', 'Salvando MAC WoL...');
+
+    try {
+      const response = await fetch('/api/wol-targets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || 'Erro ao salvar');
+      }
+
+      setStatus('success', `MAC ${data.target.mac} salvo com sucesso!`);
+      await loadTargets();
+    } catch (error) {
+      setStatus('error', `❌ ${error.message}`);
+    }
+  });
+
+  loadTargets();
+</script>
+</body>
+</html>

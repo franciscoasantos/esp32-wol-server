@@ -3,16 +3,29 @@ const logger = require('./utils/logger');
 const { HTTP_PORT } = require('./config');
 const { checkJWT } = require('./auth/jwt');
 const { handleLogin, handleLogout, handleAuth } = require('./routes/auth');
-const { handleHome, handleLEDPage, handleStatus, handleWOL, handleLED } = require('./routes/api');
-const { initializeTunnel, onStatusChange, isESPConnected } = require('./websocket/espTunnel');
+const {
+  handleHome,
+  handleLEDPage,
+  handleConfigPage,
+  handleWolTargetsPage,
+  handleStatus,
+  handleGetClients,
+  handleGetDiscoveredClients,
+  handleGetWolTargets,
+  handleUpsertWolTarget,
+  handleUpsertClient,
+  handleWOL,
+  handleLED
+} = require('./routes/api');
+const { initializeTunnel, onStatusChange } = require('./websocket/espTunnel');
 const { notifyClients } = require('./utils/sse');
 
 // Initialize WebSocket tunnel
 initializeTunnel();
 
 // Listen to ESP connection status changes and notify SSE clients
-onStatusChange((connected) => {
-  notifyClients({ connected });
+onStatusChange((connectedClients) => {
+  notifyClients({ connected: connectedClients.length > 0, connectedClients });
 });
 
 // HTTP Server
@@ -54,6 +67,38 @@ const httpServer = http.createServer((req, res) => {
   // LED CONTROL PAGE
   if (req.url === "/led" && req.method === "GET") {
     return handleLEDPage(req, res);
+  }
+
+  // CONFIG PAGE
+  if (req.url === "/config" && req.method === "GET") {
+    return handleConfigPage(req, res);
+  }
+
+  // WOL TARGETS PAGE
+  if (req.url === "/wol-targets" && req.method === "GET") {
+    return handleWolTargetsPage(req, res);
+  }
+
+  // CLIENTS API
+  if (req.url === "/api/clients" && req.method === "GET") {
+    return handleGetClients(req, res);
+  }
+
+  if (req.url === "/api/clients/discovered" && req.method === "GET") {
+    return handleGetDiscoveredClients(req, res);
+  }
+
+  if (req.url === "/api/clients" && req.method === "POST") {
+    return handleUpsertClient(req, res);
+  }
+
+  // WOL TARGETS API
+  if (req.url === "/api/wol-targets" && req.method === "GET") {
+    return handleGetWolTargets(req, res);
+  }
+
+  if (req.url === "/api/wol-targets" && req.method === "POST") {
+    return handleUpsertWolTarget(req, res);
   }
 
   // WAKE-ON-LAN COMMAND

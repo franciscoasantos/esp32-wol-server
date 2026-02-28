@@ -2,43 +2,147 @@ const WebSocket = require('ws');
 const logger = require('../utils/logger');
 const { validateHMAC, validateTimestamp } = require('../auth/hmac');
 const { TUNNEL_PORT } = require('../config');
+const { normalizeMac } = require('../data/clientsStore');
+const { getClientByMac } = require('../data/clientsStore');
 
-let espWebSocket = null;
-let espConnected = false;
+const clients = new Map();
+const clientDetails = new Map();
 const statusChangeCallbacks = [];
+const commandQueues = new Map();
+
+function formatWsPayload(payload) {
+  if (typeof payload === 'string') return payload;
+  try {
+    return JSON.stringify(payload);
+  } catch (_e) {
+    return String(payload);
+  }
+}
+
+function getConnectedClients() {
+  return Array.from(clients.keys());
+}
+
+function getConnectedClientDetails() {
+  return Array.from(clientDetails.entries()).map(([espMac, details]) => ({
+    espMac,
+    ip: details.ip
+  }));
+}
 
 function onStatusChange(callback) {
   statusChangeCallbacks.push(callback);
 }
 
 function notifyStatusChange() {
-  statusChangeCallbacks.forEach(callback => callback(espConnected));
+  const connectedClients = getConnectedClients();
+  statusChangeCallbacks.forEach((callback) => callback(connectedClients));
 }
 
-function isESPConnected() {
-  return espConnected;
+function isESPConnected(espMac) {
+  if (!espMac) {
+    return clients.size > 0;
+  }
+
+  const normalized = normalizeMac(espMac);
+  return normalized ? clients.has(normalized) : false;
 }
 
-function getESPWebSocket() {
-  return espWebSocket;
+function getESPWebSocket(espMac) {
+  const normalized = normalizeMac(espMac);
+  if (!normalized) return null;
+  return clients.get(normalized) || null;
+}
+
+function enqueueCommand(espMac, operation) {
+  const normalized = normalizeMac(espMac);
+  if (!normalized) {
+    return Promise.reject(new Error('MAC inválido'));
+  }
+
+  const previous = commandQueues.get(normalized) || Promise.resolve();
+  const next = previous.catch(() => undefined).then(operation);
+
+  commandQueues.set(normalized, next.finally(() => {
+    if (commandQueues.get(normalized) === next) {
+      commandQueues.delete(normalized);
+    }
+  }));
+
+  return next;
+}
+
+function sendCommandToESP(espMac, payload, timeoutMs = 5000) {
+  return enqueueCommand(espMac, () => new Promise((resolve, reject) => {
+    const ws = getESPWebSocket(espMac);
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      return reject(new Error('ESP offline'));
+    }
+
+    const cleanupListeners = [];
+
+    const cleanup = () => {
+      cleanupListeners.forEach((fn) => fn());
+      cleanupListeners.length = 0;
+    };
+
+    const timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error('ESP timeout'));
+    }, timeoutMs);
+
+    cleanupListeners.push(() => clearTimeout(timeout));
+
+    const onMessage = (data) => {
+      cleanup();
+      try {
+        resolve(JSON.parse(data.toString()));
+      } catch (_e) {
+        reject(new Error('Invalid ESP response'));
+      }
+    };
+
+    const onSocketClosed = () => {
+      cleanup();
+      reject(new Error('ESP offline'));
+    };
+
+    ws.once('message', onMessage);
+    ws.once('close', onSocketClosed);
+    ws.once('error', onSocketClosed);
+
+    cleanupListeners.push(() => ws.removeListener('message', onMessage));
+    cleanupListeners.push(() => ws.removeListener('close', onSocketClosed));
+    cleanupListeners.push(() => ws.removeListener('error', onSocketClosed));
+
+    logger.debug(`[WS TX][${espMac}] ${formatWsPayload(payload)}`);
+    ws.send(JSON.stringify(payload));
+  }));
+}
+
+function normalizeIp(value) {
+  if (!value || typeof value !== 'string') return null;
+  if (value.startsWith('::ffff:')) return value.slice(7);
+  return value;
 }
 
 function initializeTunnel() {
   const wss = new WebSocket.Server({ port: TUNNEL_PORT });
 
-  wss.on('connection', (ws) => {
-    logger.info("Incoming ESP WebSocket connection...");
-    
+  wss.on('connection', (ws, request) => {
+    logger.info('Incoming ESP WebSocket connection...');
+
     let authenticated = false;
+    let authenticatedMac = null;
     let pingInterval = null;
-    let authTimeout = setTimeout(() => {
+
+    const authTimeout = setTimeout(() => {
       if (!authenticated) {
-        logger.warn("Authentication timeout - no valid auth received in 10s");
+        logger.warn('Authentication timeout - no valid auth received in 10s');
         ws.close();
       }
-    }, 10000); // 10 segundos para autenticar
-    
-    // Configurar ping/pong
+    }, 10000);
+
     ws.isAlive = true;
     ws.on('pong', () => {
       ws.isAlive = true;
@@ -46,80 +150,122 @@ function initializeTunnel() {
 
     ws.on('message', (message) => {
       const data = message.toString();
-      
-      if (!authenticated) {
+
+      if (authenticated) {
+        logger.debug(`[WS RX][${authenticatedMac}] ${data}`);
+
         try {
-          const auth = JSON.parse(data);
-          const { token, hmac } = auth;
+          const payload = JSON.parse(data);
+          if (payload?.action === 'get_config') {
+            const clientConfig = getClientByMac(authenticatedMac);
 
-          logger.debug(`Auth attempt: token="${token}"`);
-
-          if (!token || !hmac) {
-            logger.error("Missing token or hmac");
-            ws.close();
-            return;
-          }
-
-          // Valida timestamp primeiro (mais fácil de diagnosticar)
-          if (!validateTimestamp(token)) {
-            logger.error("Invalid or expired timestamp");
-            ws.close();
-            return;
-          }
-
-          // Valida HMAC
-          if (!validateHMAC(token, hmac)) {
-            logger.error("Invalid HMAC");
-            ws.close();
-            return;
-          }
-
-          logger.info("ESP authenticated successfully");
-          authenticated = true;
-          clearTimeout(authTimeout);
-          espWebSocket = ws;
-          espConnected = true;
-          notifyStatusChange();
-          
-          // Iniciar ping a cada 10 segundos
-          pingInterval = setInterval(() => {
-            if (!ws.isAlive) {
-              // Não respondeu ao ping anterior, terminar conexão
-              logger.warn("ESP not responding to ping, terminating connection");
-              return ws.terminate();
+            if (!clientConfig || !Number.isInteger(clientConfig.ledCount) || !Number.isInteger(clientConfig.ledPin)) {
+              const errorResponse = {
+                status: 'error',
+                action: 'config',
+                error: 'config_incomplete'
+              };
+              logger.debug(`[WS TX][${authenticatedMac}] ${formatWsPayload(errorResponse)}`);
+              ws.send(JSON.stringify(errorResponse));
+              return;
             }
-            
-            // Ping anterior foi respondido, enviar próximo ping
-            ws.isAlive = false;
-            ws.ping();
-          }, 10000); // ping a cada 10s
 
-        } catch (e) {
-          logger.error("Invalid auth JSON:", data);
-          logger.error("Error:", e.message);
-          ws.close();
+            const configResponse = {
+              status: 'ok',
+              action: 'config',
+              ledCount: clientConfig.ledCount,
+              ledPin: clientConfig.ledPin
+            };
+            logger.debug(`[WS TX][${authenticatedMac}] ${formatWsPayload(configResponse)}`);
+            ws.send(JSON.stringify(configResponse));
+            return;
+          }
+        } catch (_e) {
+          logger.warn(`Mensagem autenticada inválida de ${authenticatedMac}`);
         }
+
+        return;
+      }
+
+      logger.debug(`[WS RX][UNAUTH] ${data}`);
+
+      try {
+        const auth = JSON.parse(data);
+        const { token, hmac, mac } = auth;
+        const normalizedMac = normalizeMac(mac);
+
+        logger.debug(`Auth attempt: token="${token}"`);
+
+        if (!token || !hmac || !normalizedMac) {
+          logger.error('Missing/invalid token, hmac or mac');
+          ws.close();
+          return;
+        }
+
+        if (!validateTimestamp(token)) {
+          logger.error('Invalid or expired timestamp');
+          ws.close();
+          return;
+        }
+
+        if (!validateHMAC(token, hmac)) {
+          logger.error('Invalid HMAC');
+          ws.close();
+          return;
+        }
+
+        logger.info(`ESP authenticated successfully: ${normalizedMac}`);
+        authenticated = true;
+        authenticatedMac = normalizedMac;
+        clearTimeout(authTimeout);
+
+        const previousWs = clients.get(normalizedMac);
+        if (previousWs && previousWs !== ws) {
+          previousWs.close();
+        }
+
+        clients.set(normalizedMac, ws);
+        clientDetails.set(normalizedMac, {
+          ip: normalizeIp(request?.socket?.remoteAddress)
+        });
+        notifyStatusChange();
+
+        pingInterval = setInterval(() => {
+          if (!ws.isAlive) {
+            logger.warn(`ESP not responding to ping, terminating connection: ${normalizedMac}`);
+            return ws.terminate();
+          }
+
+          ws.isAlive = false;
+          ws.ping();
+        }, 10000);
+      } catch (e) {
+        logger.error('Invalid auth JSON:', data);
+        logger.error('Error:', e.message);
+        ws.close();
       }
     });
 
     ws.on('close', () => {
-      logger.info("ESP disconnected");
+      logger.info('ESP disconnected');
       clearTimeout(authTimeout);
       if (pingInterval) clearInterval(pingInterval);
-      if (espWebSocket === ws) {
-        espWebSocket = null;
-        espConnected = false;
+
+      if (authenticatedMac && clients.get(authenticatedMac) === ws) {
+        clients.delete(authenticatedMac);
+        clientDetails.delete(authenticatedMac);
         notifyStatusChange();
       }
     });
 
     ws.on('error', (err) => {
-      logger.error("ESP WebSocket error:", err.message);
+      logger.error('ESP WebSocket error:', err.message);
       clearTimeout(authTimeout);
       if (pingInterval) clearInterval(pingInterval);
-      if (espWebSocket === ws) {
-        espWebSocket = null;
-        espConnected = false;
+
+      if (authenticatedMac && clients.get(authenticatedMac) === ws) {
+        clients.delete(authenticatedMac);
+        clientDetails.delete(authenticatedMac);
         notifyStatusChange();
       }
     });
@@ -132,5 +278,8 @@ module.exports = {
   initializeTunnel,
   onStatusChange,
   isESPConnected,
-  getESPWebSocket
+  getESPWebSocket,
+  getConnectedClients,
+  getConnectedClientDetails,
+  sendCommandToESP
 };
