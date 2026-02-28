@@ -36,13 +36,34 @@ body {
 }
 
 h1 {
-  margin: 0 0 8px 0;
-  text-align: center;
+  margin: 0;
   font-size: 26px;
 }
 
+.title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.esp-indicator {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1px solid rgba(255,255,255,0.25);
+}
+
+.esp-indicator.online {
+  background: #4ade80;
+}
+
+.esp-indicator.offline {
+  background: #f87171;
+}
+
 .subtitle {
-  text-align: center;
+  text-align: left;
   opacity: 0.7;
   margin-bottom: 24px;
   font-size: 14px;
@@ -69,29 +90,6 @@ h1 {
   font-size: 18px;
   font-weight: 600;
   color: #4CAF50;
-}
-
-.esp-status {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 12px;
-  border-radius: 8px;
-  margin-bottom: 20px;
-  font-size: 14px;
-  font-weight: 500;
-}
-
-.esp-status.online {
-  background: rgba(34, 197, 94, 0.15);
-  border: 1px solid rgba(34, 197, 94, 0.3);
-  color: #4ade80;
-}
-
-.esp-status.offline {
-  background: rgba(239, 68, 68, 0.15);
-  border: 1px solid rgba(239, 68, 68, 0.3);
-  color: #f87171;
 }
 
 .status {
@@ -172,14 +170,24 @@ button .icon {
   text-align: center;
 }
 
-.logout a {
+.links {
+  margin-top: 16px;
+  text-align: center;
+  display: flex;
+  justify-content: center;
+  gap: 16px;
+}
+
+.logout a,
+.links a {
   color: rgba(255,255,255,0.6);
   text-decoration: none;
   font-size: 14px;
   transition: color 0.2s;
 }
 
-.logout a:hover {
+.logout a:hover,
+.links a:hover {
   color: rgba(255,255,255,0.9);
 }
 
@@ -194,13 +202,11 @@ button .icon {
 <body>
   <div class="container">
     <div class="card">
-      <h1>⚡ Wake-on-LAN</h1>
-      <p class="subtitle">Controle de dispositivos remotos</p>
-      
-      <div id="espStatus" class="esp-status offline">
-        <div class="status-dot"></div>
-        <span id="espStatusText">ESP32: Desconectado</span>
+      <div class="title-row">
+        <h1>⚡ Wake-on-LAN</h1>
+        <span id="espIndicator" class="esp-indicator offline" title="ESP32: Desconectado" aria-label="ESP32: Desconectado"></span>
       </div>
+      <p class="subtitle">Controle de dispositivos remotos</p>
 
       <div class="device-info">
         <label>Endereço MAC</label>
@@ -217,6 +223,10 @@ button .icon {
         Ligar Dispositivo
       </button>
 
+      <div class="links">
+        <a href="/led">Controle de LED</a>
+      </div>
+
       <div class="logout">
         <a href="/logout">Sair</a>
       </div>
@@ -229,17 +239,18 @@ button .icon {
     
     eventSource.addEventListener('status', (event) => {
       const data = JSON.parse(event.data);
-      const espStatus = document.getElementById('espStatus');
-      const espStatusText = document.getElementById('espStatusText');
+      const espIndicator = document.getElementById('espIndicator');
       const wolBtn = document.getElementById('wolBtn');
       
       if (data.connected) {
-        espStatus.className = 'esp-status online';
-        espStatusText.textContent = 'ESP32: Conectado';
+        espIndicator.className = 'esp-indicator online';
+        espIndicator.title = 'ESP32: Conectado';
+        espIndicator.setAttribute('aria-label', 'ESP32: Conectado');
         wolBtn.disabled = false;
       } else {
-        espStatus.className = 'esp-status offline';
-        espStatusText.textContent = 'ESP32: Desconectado';
+        espIndicator.className = 'esp-indicator offline';
+        espIndicator.title = 'ESP32: Desconectado';
+        espIndicator.setAttribute('aria-label', 'ESP32: Desconectado');
         wolBtn.disabled = true;
       }
     });
@@ -260,7 +271,7 @@ button .icon {
         const response = await fetch('/wol', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ mac: 'A8:A1:59:98:61:0E' })
+          body: JSON.stringify({ action: 'wol', mac: 'A8:A1:59:98:61:0E' })
         });
 
         const data = await response.json();

@@ -3,7 +3,7 @@ const logger = require('./utils/logger');
 const { HTTP_PORT } = require('./config');
 const { checkJWT } = require('./auth/jwt');
 const { handleLogin, handleLogout, handleAuth } = require('./routes/auth');
-const { handleHome, handleStatus, handleWOL } = require('./routes/api');
+const { handleHome, handleLEDPage, handleStatus, handleWOL, handleLED } = require('./routes/api');
 const { initializeTunnel, onStatusChange, isESPConnected } = require('./websocket/espTunnel');
 const { notifyClients } = require('./utils/sse');
 
@@ -51,9 +51,19 @@ const httpServer = http.createServer((req, res) => {
     return handleHome(req, res);
   }
 
+  // LED CONTROL PAGE
+  if (req.url === "/led" && req.method === "GET") {
+    return handleLEDPage(req, res);
+  }
+
   // WAKE-ON-LAN COMMAND
   if (req.url === "/wol" && req.method === "POST") {
     return handleWOL(req, res);
+  }
+
+  // LED COMMAND
+  if (req.url === "/led" && req.method === "POST") {
+    return handleLED(req, res);
   }
 
   // 404

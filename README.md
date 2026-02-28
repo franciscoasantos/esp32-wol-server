@@ -107,10 +107,23 @@ O dispositivo ESP deve:
    - O servidor valida o HMAC e rejeita conexões inválidas
    - Timestamp deve ter no máximo 5 minutos de diferença
 
-3. **Aguardar comandos Wake-on-LAN** no formato JSON:
+3. **Aguardar comandos** no formato JSON:
+
+**Wake-on-LAN:**
 ```json
 {
+  "action": "wol",
   "mac": "A8:A1:59:98:61:0E"
+}
+```
+
+**Controle de LED:**
+```json
+{
+  "action": "led",
+  "r": 255,
+  "g": 140,
+  "b": 55
 }
 ```
 
@@ -198,7 +211,24 @@ Envia comando Wake-on-LAN via ESP32.
 **Request:**
 ```json
 {
+  "action": "wol",
   "mac": "A8:A1:59:98:61:0E"
+}
+```
+
+#### `GET /led`
+Retorna a página de controle de LED.
+
+#### `POST /led`
+Envia comando de cor RGB para fita de LED via ESP32.
+
+**Request:**
+```json
+{
+  "action": "led",
+  "r": 255,
+  "g": 140,
+  "b": 55
 }
 ```
 

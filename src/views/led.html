@@ -1,0 +1,781 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Controle de LED</title>
+
+<style>
+* {
+  box-sizing: border-box;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+body {
+  margin: 0;
+  background: linear-gradient(135deg, #0f172a, #020617);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 16px;
+}
+
+.container {
+  width: 100%;
+  max-width: 560px;
+}
+
+.card {
+  padding: 28px;
+  background: rgba(255,255,255,0.05);
+  backdrop-filter: blur(12px);
+  border-radius: 14px;
+  box-shadow: 0 10px 40px rgba(0,0,0,0.4);
+}
+
+h1 {
+  margin: 0;
+  font-size: 26px;
+}
+
+.title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.esp-indicator {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1px solid rgba(255,255,255,0.25);
+}
+
+.esp-indicator.online {
+  background: #4ade80;
+}
+
+.esp-indicator.offline {
+  background: #f87171;
+}
+
+.subtitle {
+  text-align: left;
+  opacity: 0.7;
+  margin-bottom: 20px;
+  font-size: 14px;
+}
+
+.picker-area {
+  margin: 0 auto 18px;
+  width: 320px;
+  height: 320px;
+  position: relative;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+#ringCanvas {
+  width: 320px;
+  height: 320px;
+  position: absolute;
+  inset: 0;
+  touch-action: none;
+}
+
+#svCanvas {
+  width: 182px;
+  height: 182px;
+  position: absolute;
+  left: 69px;
+  top: 69px;
+  border-radius: 8px;
+  touch-action: none;
+}
+
+.selector {
+  position: absolute;
+  pointer-events: none;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.4);
+}
+
+#ringSelector {
+  width: 14px;
+  height: 14px;
+  margin-left: -7px;
+  margin-top: -7px;
+}
+
+#svSelector {
+  width: 12px;
+  height: 12px;
+  margin-left: -6px;
+  margin-top: -6px;
+}
+
+.current-color {
+  text-align: center;
+  margin-bottom: 14px;
+  font-weight: 600;
+  opacity: 0.9;
+}
+
+.tone-section {
+  margin-bottom: 16px;
+}
+
+.tone-title,
+.favorites-title {
+  font-size: 14px;
+  margin-bottom: 10px;
+  opacity: 0.9;
+}
+
+.swatch-row {
+  display: grid;
+  grid-template-columns: repeat(10, 1fr);
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.favorites-row {
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.swatch {
+  height: 28px;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  position: relative;
+  box-shadow: none;
+  transition: none;
+  transform: none;
+  padding: 0;
+}
+
+.swatch:hover,
+.swatch:active,
+.swatch:disabled {
+  box-shadow: none;
+  transform: none;
+}
+
+.swatch.active::after {
+  content: "";
+  position: absolute;
+  inset: 6px;
+  border-radius: 4px;
+  border: 2px solid rgba(0, 0, 0, 0.45);
+}
+
+.status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+  font-size: 14px;
+}
+
+.status.info {
+  background: rgba(59, 130, 246, 0.15);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  color: #60a5fa;
+}
+
+.status.success {
+  background: rgba(34, 197, 94, 0.15);
+  border: 1px solid rgba(34, 197, 94, 0.3);
+  color: #4ade80;
+}
+
+.status.error {
+  background: rgba(239, 68, 68, 0.15);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: #f87171;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+button {
+  width: 100%;
+  padding: 14px;
+  border: none;
+  border-radius: 10px;
+  font-size: 16px;
+  font-weight: 600;
+  background: linear-gradient(135deg, #4CAF50, #43a047);
+  color: white;
+  cursor: pointer;
+  transition: all 0.2s;
+  box-shadow: 0 4px 12px rgba(76, 175, 80, 0.3);
+}
+
+button:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(76, 175, 80, 0.4);
+}
+
+button:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.links {
+  margin-top: 16px;
+  text-align: center;
+  display: flex;
+  justify-content: center;
+  gap: 16px;
+}
+
+.links a {
+  color: rgba(255,255,255,0.7);
+  text-decoration: none;
+  font-size: 14px;
+  transition: color 0.2s;
+}
+
+.links a:hover {
+  color: rgba(255,255,255,0.95);
+}
+
+@media (max-width: 560px) {
+  .picker-area {
+    width: 280px;
+    height: 280px;
+  }
+
+  #ringCanvas {
+    width: 280px;
+    height: 280px;
+  }
+
+  #svCanvas {
+    width: 156px;
+    height: 156px;
+    left: 62px;
+    top: 62px;
+  }
+
+  .favorites-row {
+    grid-template-columns: repeat(8, 1fr);
+  }
+}
+
+@media (max-width: 420px) {
+  .card {
+    padding: 24px;
+  }
+
+  .swatch-row {
+    gap: 6px;
+  }
+}
+</style>
+</head>
+
+<body>
+  <div class="container">
+    <div class="card">
+      <div class="title-row">
+        <h1>🎨 Controle de LED</h1>
+        <span id="espIndicator" class="esp-indicator offline" title="ESP32: Desconectado" aria-label="ESP32: Desconectado"></span>
+      </div>
+      <p class="subtitle">Selecione a cor da fita</p>
+
+      <div class="picker-area" id="pickerArea">
+        <canvas id="ringCanvas" width="320" height="320"></canvas>
+        <canvas id="svCanvas" width="182" height="182"></canvas>
+        <div id="ringSelector" class="selector"></div>
+        <div id="svSelector" class="selector"></div>
+      </div>
+
+      <div class="current-color" id="currentColor">Cor atual: #FF8C37</div>
+
+      <div class="tone-section">
+        <div class="tone-title">Tons</div>
+        <div class="swatch-row" id="tonesRow"></div>
+      </div>
+
+      <div class="favorites-section">
+        <div class="favorites-title">Cores favoritas</div>
+        <div class="favorites-row" id="favoritesRow"></div>
+      </div>
+
+      <div id="status" class="status info">
+        <div class="status-dot"></div>
+        <span>Aguardando ação...</span>
+      </div>
+
+      <div class="links">
+        <a href="/">Wake-on-LAN</a>
+        <a href="/logout">Sair</a>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const eventSource = new EventSource('/api/status');
+
+    const pickerArea = document.getElementById('pickerArea');
+    const ringCanvas = document.getElementById('ringCanvas');
+    const svCanvas = document.getElementById('svCanvas');
+    const ringCtx = ringCanvas.getContext('2d');
+    const svCtx = svCanvas.getContext('2d');
+    const ringSelector = document.getElementById('ringSelector');
+    const svSelector = document.getElementById('svSelector');
+    const tonesRow = document.getElementById('tonesRow');
+    const favoritesRow = document.getElementById('favoritesRow');
+    const currentColor = document.getElementById('currentColor');
+    const status = document.getElementById('status');
+
+    const RING_THICKNESS_RATIO = 0.0625;
+    const favorites = ['#FFFFFF', '#FF0000', '#FF7A00', '#FBFF00', '#8BFF00', '#00FF00', '#00D4FF', '#0095FF', '#0022FF', '#6B2CFF', '#EA00FF', '#FF4D94'];
+
+    let ringSize = 320;
+    let ringThickness = 20;
+    let ringRadius = ringSize / 2;
+    let svSize = 182;
+    let svOffsetX = 69;
+    let svOffsetY = 69;
+
+    let hue = 27;
+    let saturation = 0.78;
+    let value = 1;
+    let anchorHue = 27;
+    let anchorSaturation = 0.78;
+    let anchorValue = 1;
+    let dragMode = null;
+    let espOnline = false;
+    let sendTimer = null;
+    let pendingSend = false;
+    let sending = false;
+
+    eventSource.addEventListener('status', (event) => {
+      const data = JSON.parse(event.data);
+      const espIndicator = document.getElementById('espIndicator');
+
+      if (data.connected) {
+        espIndicator.className = 'esp-indicator online';
+        espIndicator.title = 'ESP32: Conectado';
+        espIndicator.setAttribute('aria-label', 'ESP32: Conectado');
+        espOnline = true;
+        if (pendingSend && !sending) {
+          sendLED();
+        }
+      } else {
+        espIndicator.className = 'esp-indicator offline';
+        espIndicator.title = 'ESP32: Desconectado';
+        espIndicator.setAttribute('aria-label', 'ESP32: Desconectado');
+        espOnline = false;
+      }
+    });
+
+    eventSource.onerror = () => {
+      console.error('SSE connection error');
+    };
+
+    function rgbToHex(rgb) {
+      const toHex = (n) => n.toString(16).padStart(2, '0').toUpperCase();
+      return `#${toHex(rgb.r)}${toHex(rgb.g)}${toHex(rgb.b)}`;
+    }
+
+    function hexToRgb(hex) {
+      const sanitized = hex.replace('#', '');
+      return {
+        r: parseInt(sanitized.slice(0, 2), 16),
+        g: parseInt(sanitized.slice(2, 4), 16),
+        b: parseInt(sanitized.slice(4, 6), 16)
+      };
+    }
+
+    function hsvToRgb(h, s, v) {
+      const c = v * s;
+      const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+      const m = v - c;
+      let r1 = 0;
+      let g1 = 0;
+      let b1 = 0;
+
+      if (h < 60) {
+        r1 = c; g1 = x;
+      } else if (h < 120) {
+        r1 = x; g1 = c;
+      } else if (h < 180) {
+        g1 = c; b1 = x;
+      } else if (h < 240) {
+        g1 = x; b1 = c;
+      } else if (h < 300) {
+        r1 = x; b1 = c;
+      } else {
+        r1 = c; b1 = x;
+      }
+
+      return {
+        r: Math.round((r1 + m) * 255),
+        g: Math.round((g1 + m) * 255),
+        b: Math.round((b1 + m) * 255)
+      };
+    }
+
+    function rgbToHsv(r, g, b) {
+      const rn = r / 255;
+      const gn = g / 255;
+      const bn = b / 255;
+      const max = Math.max(rn, gn, bn);
+      const min = Math.min(rn, gn, bn);
+      const delta = max - min;
+
+      let h = 0;
+      if (delta !== 0) {
+        if (max === rn) {
+          h = 60 * (((gn - bn) / delta) % 6);
+        } else if (max === gn) {
+          h = 60 * (((bn - rn) / delta) + 2);
+        } else {
+          h = 60 * (((rn - gn) / delta) + 4);
+        }
+      }
+      if (h < 0) h += 360;
+
+      const s = max === 0 ? 0 : delta / max;
+      const v = max;
+      return { h, s, v };
+    }
+
+    function mixRgb(a, b, factor) {
+      return {
+        r: Math.round(a.r + ((b.r - a.r) * factor)),
+        g: Math.round(a.g + ((b.g - a.g) * factor)),
+        b: Math.round(a.b + ((b.b - a.b) * factor))
+      };
+    }
+
+    function setCurrentColor(newHue, newSaturation, newValue, updateAnchor) {
+      hue = newHue;
+      saturation = newSaturation;
+      value = newValue;
+
+      if (updateAnchor) {
+        anchorHue = newHue;
+        anchorSaturation = newSaturation;
+        anchorValue = newValue;
+      }
+    }
+
+    function renderHueRing() {
+      const image = ringCtx.createImageData(ringSize, ringSize);
+      const data = image.data;
+      const inner = ringRadius - ringThickness;
+      const edgeSoftness = 1.5;
+
+      for (let y = 0; y < ringSize; y++) {
+        for (let x = 0; x < ringSize; x++) {
+          const dx = x - ringRadius;
+          const dy = y - ringRadius;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          const idx = (y * ringSize + x) * 4;
+
+          if (dist >= inner - edgeSoftness && dist <= ringRadius + edgeSoftness) {
+            const angle = (Math.atan2(dy, dx) * 180 / Math.PI + 360) % 360;
+            const rgb = hsvToRgb(angle, 1, 1);
+            let alpha = 1;
+
+            if (dist < inner) {
+              alpha = (dist - (inner - edgeSoftness)) / edgeSoftness;
+            } else if (dist > ringRadius) {
+              alpha = ((ringRadius + edgeSoftness) - dist) / edgeSoftness;
+            }
+
+            const clampedAlpha = Math.max(0, Math.min(1, alpha));
+            data[idx] = rgb.r;
+            data[idx + 1] = rgb.g;
+            data[idx + 2] = rgb.b;
+            data[idx + 3] = Math.round(clampedAlpha * 255);
+          } else {
+            data[idx + 3] = 0;
+          }
+        }
+      }
+
+      ringCtx.putImageData(image, 0, 0);
+    }
+
+    function renderSvSquare() {
+      const hueRgb = hsvToRgb(hue, 1, 1);
+      svCtx.clearRect(0, 0, svSize, svSize);
+
+      const gradSat = svCtx.createLinearGradient(0, 0, svSize, 0);
+      gradSat.addColorStop(0, '#FFFFFF');
+      gradSat.addColorStop(1, `rgb(${hueRgb.r}, ${hueRgb.g}, ${hueRgb.b})`);
+      svCtx.fillStyle = gradSat;
+      svCtx.fillRect(0, 0, svSize, svSize);
+
+      const gradVal = svCtx.createLinearGradient(0, 0, 0, svSize);
+      gradVal.addColorStop(0, 'rgba(0, 0, 0, 0)');
+      gradVal.addColorStop(1, 'rgba(0, 0, 0, 1)');
+      svCtx.fillStyle = gradVal;
+      svCtx.fillRect(0, 0, svSize, svSize);
+    }
+
+    function updateSelectors() {
+      const angle = (hue * Math.PI) / 180;
+      const ringMid = ringRadius - (ringThickness / 2);
+      const ringX = ringRadius + Math.cos(angle) * ringMid;
+      const ringY = ringRadius + Math.sin(angle) * ringMid;
+      ringSelector.style.left = `${ringX}px`;
+      ringSelector.style.top = `${ringY}px`;
+
+      const svX = svOffsetX + (saturation * svSize);
+      const svY = svOffsetY + ((1 - value) * svSize);
+      svSelector.style.left = `${svX}px`;
+      svSelector.style.top = `${svY}px`;
+    }
+
+    function updatePickerGeometry() {
+      ringSize = Math.round(ringCanvas.clientWidth || 320);
+      ringThickness = Math.max(14, Math.round(ringSize * RING_THICKNESS_RATIO));
+      ringRadius = (ringSize - 1) / 2;
+
+      svSize = Math.round(svCanvas.clientWidth || 182);
+      svOffsetX = svCanvas.offsetLeft;
+      svOffsetY = svCanvas.offsetTop;
+
+      if (ringCanvas.width !== ringSize || ringCanvas.height !== ringSize) {
+        ringCanvas.width = ringSize;
+        ringCanvas.height = ringSize;
+      }
+
+      if (svCanvas.width !== svSize || svCanvas.height !== svSize) {
+        svCanvas.width = svSize;
+        svCanvas.height = svSize;
+      }
+    }
+
+    function renderTones() {
+      tonesRow.innerHTML = '';
+      const anchorRgb = hsvToRgb(anchorHue, anchorSaturation, anchorValue);
+      const activeHex = rgbToHex(hsvToRgb(hue, saturation, value));
+
+      for (let i = 0; i < 10; i++) {
+        let rgb;
+        if (i <= 4) {
+          const toAnchor = i / 4;
+          rgb = mixRgb({ r: 255, g: 255, b: 255 }, anchorRgb, toAnchor);
+        } else {
+          const toDark = (i - 4) / 5;
+          rgb = mixRgb(anchorRgb, { r: 0, g: 0, b: 0 }, toDark);
+        }
+
+        const hex = rgbToHex(rgb);
+        const button = document.createElement('button');
+        button.className = `swatch${hex === activeHex ? ' active' : ''}`;
+        button.style.background = hex;
+        button.title = hex;
+        button.type = 'button';
+        button.addEventListener('click', () => {
+          const selectedHsv = rgbToHsv(rgb.r, rgb.g, rgb.b);
+          setCurrentColor(selectedHsv.h, selectedHsv.s, selectedHsv.v, false);
+          renderAll();
+          scheduleAutoSend();
+        });
+        tonesRow.appendChild(button);
+      }
+    }
+
+    function renderFavorites() {
+      favoritesRow.innerHTML = '';
+      const activeHex = rgbToHex(hsvToRgb(hue, saturation, value));
+
+      favorites.forEach((hex) => {
+        const button = document.createElement('button');
+        button.className = `swatch${hex.toUpperCase() === activeHex ? ' active' : ''}`;
+        button.style.background = hex;
+        button.title = hex;
+        button.type = 'button';
+        button.addEventListener('click', () => {
+          const rgb = hexToRgb(hex);
+          const selectedHsv = rgbToHsv(rgb.r, rgb.g, rgb.b);
+          setCurrentColor(selectedHsv.h, selectedHsv.s, selectedHsv.v, true);
+          renderAll();
+          scheduleAutoSend();
+        });
+        favoritesRow.appendChild(button);
+      });
+    }
+
+    function renderAll() {
+      renderSvSquare();
+      updateSelectors();
+      renderTones();
+      renderFavorites();
+      currentColor.textContent = `Cor atual: ${rgbToHex(hsvToRgb(hue, saturation, value))}`;
+    }
+
+    function scheduleAutoSend() {
+      pendingSend = true;
+      if (sendTimer) {
+        clearTimeout(sendTimer);
+      }
+
+      sendTimer = setTimeout(() => {
+        if (!sending) {
+          sendLED();
+        }
+      }, 120);
+    }
+
+    function pointerToLocal(event) {
+      const rect = pickerArea.getBoundingClientRect();
+      return {
+        x: event.clientX - rect.left,
+        y: event.clientY - rect.top
+      };
+    }
+
+    function updateFromRingPoint(point) {
+      const dx = point.x - ringRadius;
+      const dy = point.y - ringRadius;
+      const newHue = (Math.atan2(dy, dx) * 180 / Math.PI + 360) % 360;
+      setCurrentColor(newHue, saturation, value, true);
+      renderAll();
+      scheduleAutoSend();
+    }
+
+    function updateFromSvPoint(point) {
+      const localX = Math.max(0, Math.min(svSize, point.x - svOffsetX));
+      const localY = Math.max(0, Math.min(svSize, point.y - svOffsetY));
+      const newSaturation = localX / svSize;
+      const newValue = 1 - (localY / svSize);
+      setCurrentColor(hue, newSaturation, newValue, true);
+      renderAll();
+      scheduleAutoSend();
+    }
+
+    pickerArea.addEventListener('pointerdown', (event) => {
+      event.preventDefault();
+      const point = pointerToLocal(event);
+      const dx = point.x - ringRadius;
+      const dy = point.y - ringRadius;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const inRing = dist >= (ringRadius - ringThickness) && dist <= ringRadius;
+      const inSquare = point.x >= svOffsetX && point.x <= svOffsetX + svSize && point.y >= svOffsetY && point.y <= svOffsetY + svSize;
+
+      if (inRing) {
+        dragMode = 'ring';
+        updateFromRingPoint(point);
+      } else if (inSquare) {
+        dragMode = 'sv';
+        updateFromSvPoint(point);
+      }
+
+      if (dragMode) {
+        pickerArea.setPointerCapture(event.pointerId);
+      }
+    });
+
+    pickerArea.addEventListener('pointermove', (event) => {
+      if (!dragMode) return;
+      event.preventDefault();
+      const point = pointerToLocal(event);
+      if (dragMode === 'ring') updateFromRingPoint(point);
+      if (dragMode === 'sv') updateFromSvPoint(point);
+    });
+
+    pickerArea.addEventListener('pointerup', (event) => {
+      if (pickerArea.hasPointerCapture(event.pointerId)) {
+        pickerArea.releasePointerCapture(event.pointerId);
+      }
+      dragMode = null;
+    });
+
+    pickerArea.addEventListener('pointercancel', (event) => {
+      if (pickerArea.hasPointerCapture(event.pointerId)) {
+        pickerArea.releasePointerCapture(event.pointerId);
+      }
+      dragMode = null;
+    });
+
+    window.addEventListener('resize', () => {
+      updatePickerGeometry();
+      renderHueRing();
+      renderAll();
+    });
+
+    updatePickerGeometry();
+    renderHueRing();
+    renderAll();
+
+    async function sendLED() {
+      if (!pendingSend) {
+        return;
+      }
+
+      if (!espOnline) {
+        status.className = 'status error';
+        status.innerHTML = '<div class="status-dot"></div><span>&#x274C; ESP32 desconectado</span>';
+        return;
+      }
+
+      pendingSend = false;
+      sending = true;
+      const rgb = hsvToRgb(hue, saturation, value);
+
+      status.className = 'status info';
+      status.innerHTML = '<div class="status-dot"></div><span>Enviando comando...</span>';
+
+      try {
+        const response = await fetch('/led', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'led', ...rgb })
+        });
+
+        const data = await response.json();
+
+        if (response.ok && data.status === 'ok') {
+          status.className = 'status success';
+          status.innerHTML = '<div class="status-dot"></div><span>&#x2705; Cor aplicada com sucesso!</span>';
+        } else {
+          throw new Error(data.error || 'Erro desconhecido');
+        }
+      } catch (error) {
+        status.className = 'status error';
+        status.innerHTML = '<div class="status-dot"></div><span>&#x274C; ' + error.message + '</span>';
+      } finally {
+        sending = false;
+        if (pendingSend) {
+          sendLED();
+        }
+      }
+    }
+  </script>
+</body>
+</html>
