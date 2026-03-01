@@ -4,110 +4,53 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Controle de LED</title>
-
-<style>
-* { box-sizing: border-box; font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif; }
-body { margin: 0; background: linear-gradient(135deg, #0f172a, #020617); color: white; display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 16px; }
-.container { width: 100%; max-width: 620px; }
-.card { padding: 28px; background: rgba(255,255,255,0.05); backdrop-filter: blur(12px); border-radius: 14px; box-shadow: 0 10px 40px rgba(0,0,0,0.4); }
-h1 { margin: 0; font-size: 26px; }
-.subtitle { text-align: left; opacity: 0.7; margin: 8px 0 16px; font-size: 14px; }
-.device-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 16px; }
-.device-card { text-align: left; width: 100%; padding: 8px 9px; border-radius: 8px; border: 1px solid rgba(255,255,255,.2); background: rgba(255,255,255,.06); color: white; cursor: pointer; box-shadow: none; transform: none; }
-.device-card:hover { transform: none; box-shadow: none; background: rgba(255,255,255,.1); }
-.device-card.selected { border-color: #4CAF50; background: rgba(76, 175, 80, 0.2); }
-.device-card .name { font-weight: 600; font-size: 13px; line-height: 1.2; margin-bottom: 3px; }
-.device-card .status { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; opacity: .9; margin: 0; padding: 0; border: 0; background: transparent; color: inherit; }
-.device-card .status-indicator { width: 7px; height: 7px; border-radius: 999px; background: #f87171; }
-.device-card.is-online .status-indicator { background: #4ade80; }
-.device-empty { grid-column: 1 / -1; padding: 10px; border-radius: 8px; background: rgba(255,255,255,.06); }
-.picker-area { margin: 0 auto 18px; width: 320px; height: 320px; position: relative; touch-action: none; -webkit-user-select: none; user-select: none; }
-#ringCanvas { width: 320px; height: 320px; position: absolute; inset: 0; touch-action: none; }
-#svCanvas { width: 182px; height: 182px; position: absolute; left: 69px; top: 69px; border-radius: 8px; touch-action: none; }
-.selector { position: absolute; pointer-events: none; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,0.4); }
-#ringSelector { width: 14px; height: 14px; margin-left: -7px; margin-top: -7px; }
-#svSelector { width: 12px; height: 12px; margin-left: -6px; margin-top: -6px; }
-.current-color { text-align: center; margin-bottom: 14px; font-weight: 600; opacity: 0.9; }
-.white-section { margin-bottom: 16px; }
-.white-title { font-size: 14px; margin-bottom: 8px; opacity: 0.9; }
-.white-controls { display: flex; align-items: center; gap: 12px; }
-.white-controls input[type="range"] { flex: 1; }
-.white-value { min-width: 56px; text-align: right; font-size: 13px; opacity: 0.9; }
-.tone-section { margin-bottom: 16px; }
-.tone-title, .favorites-title { font-size: 14px; margin-bottom: 10px; opacity: 0.9; }
-.swatch-row { display: grid; grid-template-columns: repeat(10, 1fr); gap: 8px; margin-bottom: 4px; }
-.favorites-row { display: grid; grid-template-columns: repeat(12, 1fr); gap: 8px; margin-bottom: 20px; }
-.swatch { height: 28px; border: none; border-radius: 8px; cursor: pointer; position: relative; box-shadow: none; transition: none; transform: none; padding: 0; }
-.swatch:hover, .swatch:active, .swatch:disabled { box-shadow: none; transform: none; }
-.swatch.active::after { content: ""; position: absolute; inset: 6px; border-radius: 4px; border: 2px solid rgba(0, 0, 0, 0.45); }
-.status { display: flex; align-items: center; gap: 8px; padding: 12px; border-radius: 8px; margin-bottom: 20px; font-size: 14px; }
-.status.info { background: rgba(59, 130, 246, 0.15); border: 1px solid rgba(59, 130, 246, 0.3); color: #60a5fa; }
-.status.success { background: rgba(34, 197, 94, 0.15); border: 1px solid rgba(34, 197, 94, 0.3); color: #4ade80; }
-.status.error { background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.3); color: #f87171; }
-.status-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; animation: pulse 2s ease-in-out infinite; }
-@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
-button { width: 100%; padding: 14px; border: none; border-radius: 10px; font-size: 16px; font-weight: 600; background: linear-gradient(135deg, #4CAF50, #43a047); color: white; cursor: pointer; transition: all 0.2s; box-shadow: 0 4px 12px rgba(76, 175, 80, 0.3); }
-button:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(76, 175, 80, 0.4); }
-button:active:not(:disabled) { transform: translateY(0); }
-button:disabled { opacity: 0.5; cursor: not-allowed; }
-.links { margin-top: 16px; text-align: center; display: flex; justify-content: center; gap: 16px; }
-.links a { color: rgba(255,255,255,0.7); text-decoration: none; font-size: 14px; transition: color 0.2s; }
-.links a:hover { color: rgba(255,255,255,0.95); }
-@media (max-width: 560px) {
-  .device-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .picker-area { width: 280px; height: 280px; }
-  #ringCanvas { width: 280px; height: 280px; }
-  #svCanvas { width: 156px; height: 156px; left: 62px; top: 62px; }
-  .favorites-row { grid-template-columns: repeat(8, 1fr); }
-}
-@media (max-width: 420px) { .card { padding: 24px; } .swatch-row { gap: 6px; } .device-list { grid-template-columns: 1fr; } }
-</style>
+<script src="https://cdn.tailwindcss.com"></script>
 </head>
 
-<body>
-  <div class="container">
-    <div class="card">
-      <h1>🎨 Controle de LED</h1>
-      <p class="subtitle">Selecione um ou vários dispositivos e aplique a cor</p>
+<body class="m-0 flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-900 to-slate-950 p-4 text-white">
+  <div class="w-full max-w-[620px]">
+    <div class="rounded-2xl border border-white/10 bg-white/5 p-7 text-white shadow-[0_10px_40px_rgba(0,0,0,0.4)] backdrop-blur-xl max-[420px]:p-6">
+      <h1 class="m-0 text-[26px] font-semibold">🎨 Controle de LED</h1>
+      <p class="mb-4 mt-2 text-left text-sm opacity-70">Selecione um ou vários dispositivos e aplique a cor</p>
 
-      <div id="deviceList" class="device-list"></div>
+      <div id="deviceList" class="mb-4 grid grid-cols-3 gap-2 max-[560px]:grid-cols-2 max-[420px]:grid-cols-1"></div>
 
-      <div class="picker-area" id="pickerArea">
-        <canvas id="ringCanvas" width="320" height="320"></canvas>
-        <canvas id="svCanvas" width="182" height="182"></canvas>
-        <div id="ringSelector" class="selector"></div>
-        <div id="svSelector" class="selector"></div>
+      <div class="relative mx-auto mb-[18px] h-[320px] w-[320px] touch-none select-none max-[560px]:h-[280px] max-[560px]:w-[280px]" id="pickerArea">
+        <canvas id="ringCanvas" class="absolute inset-0 h-[320px] w-[320px] touch-none max-[560px]:h-[280px] max-[560px]:w-[280px]" width="320" height="320"></canvas>
+        <canvas id="svCanvas" class="absolute left-[69px] top-[69px] h-[182px] w-[182px] rounded-lg touch-none max-[560px]:left-[62px] max-[560px]:top-[62px] max-[560px]:h-[156px] max-[560px]:w-[156px]" width="182" height="182"></canvas>
+        <div id="ringSelector" class="pointer-events-none absolute h-[14px] w-[14px] -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white shadow-[0_0_0_1px_rgba(0,0,0,0.4)]"></div>
+        <div id="svSelector" class="pointer-events-none absolute h-[12px] w-[12px] -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white shadow-[0_0_0_1px_rgba(0,0,0,0.4)]"></div>
       </div>
 
-      <div class="current-color" id="currentColor">Cor atual: #FF8C37</div>
+      <div class="mb-3.5 text-center font-semibold opacity-90" id="currentColor">Cor atual: #FF8C37</div>
 
-      <div class="white-section" id="whiteSection" style="display:none;">
-        <div class="white-title">Intensidade do branco (RGBW)</div>
-        <div class="white-controls">
-          <input id="whiteSlider" type="range" min="0" max="255" step="1" value="0" />
-          <span class="white-value" id="whiteValue">0</span>
+      <div class="mb-4" id="whiteSection" style="display:none;">
+        <div class="mb-2 text-sm opacity-90">Intensidade do branco (RGBW)</div>
+        <div class="flex items-center gap-3">
+          <input id="whiteSlider" class="flex-1" type="range" min="0" max="255" step="1" value="0" />
+          <span class="min-w-14 text-right text-[13px] opacity-90" id="whiteValue">0</span>
         </div>
       </div>
 
-      <div class="tone-section">
-        <div class="tone-title">Tons</div>
-        <div class="swatch-row" id="tonesRow"></div>
+      <div class="mb-4">
+        <div class="mb-2.5 text-sm opacity-90">Tons</div>
+        <div class="mb-1 grid grid-cols-10 gap-2 max-[420px]:gap-1.5" id="tonesRow"></div>
       </div>
 
-      <div class="favorites-section">
-        <div class="favorites-title">Cores favoritas</div>
-        <div class="favorites-row" id="favoritesRow"></div>
+      <div>
+        <div class="mb-2.5 text-sm opacity-90">Cores favoritas</div>
+        <div class="mb-5 grid grid-cols-12 gap-2 max-[560px]:grid-cols-8" id="favoritesRow"></div>
       </div>
 
-      <div id="status" class="status info">
-        <div class="status-dot"></div>
+      <div id="status" class="mb-5 flex items-center gap-2 rounded-lg border border-blue-400/30 bg-blue-500/15 p-3 text-sm text-blue-300">
+        <div class="h-2 w-2 animate-pulse rounded-full bg-current"></div>
         <span>Aguardando ação...</span>
       </div>
 
-      <div class="links">
-        <a href="/">Wake-on-LAN</a>
-        <a href="/config">Configuração</a>
-        <a href="/logout">Sair</a>
+      <div class="mt-4 flex justify-center gap-4 text-center">
+        <a class="text-sm text-white/70 hover:text-white" href="/">Wake-on-LAN</a>
+        <a class="text-sm text-white/70 hover:text-white" href="/config">Configuração</a>
+        <a class="text-sm text-white/70 hover:text-white" href="/logout">Sair</a>
       </div>
     </div>
   </div>
@@ -157,6 +100,10 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
     let pendingSend = false;
     let sending = false;
     let whiteIntensity = 0;
+    const STATUS_BASE = 'mb-5 flex items-center gap-2 rounded-lg p-3 text-sm';
+    const STATUS_INFO = `${STATUS_BASE} border border-blue-400/30 bg-blue-500/15 text-blue-300`;
+    const STATUS_SUCCESS = `${STATUS_BASE} border border-green-400/30 bg-green-500/15 text-green-300`;
+    const STATUS_ERROR = `${STATUS_BASE} border border-red-400/30 bg-red-500/15 text-red-300`;
 
     function selectedClients() {
       return clients.filter((client) => selectedEspMacs.has(client.espMac));
@@ -185,17 +132,23 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 
     function renderDeviceList() {
       if (!clients.length) {
-        deviceList.innerHTML = '<div class="device-empty">Nenhum cliente cadastrado.</div>';
+        deviceList.innerHTML = '<div class="col-span-full rounded-lg bg-white/10 p-2.5 text-[13px]">Nenhum cliente cadastrado.</div>';
         return;
       }
 
       deviceList.innerHTML = clients.map((client) => {
         const selected = selectedEspMacs.has(client.espMac) ? 'selected' : '';
         const online = connectedClients.has(client.espMac) ? 'online' : 'offline';
+        const stateClasses = selected
+          ? 'border-green-500 bg-green-500/20'
+          : 'border-white/20 bg-white/5 hover:bg-white/10';
         return `
-          <button type="button" class="device-card ${selected} ${online === 'online' ? 'is-online' : 'is-offline'}" data-esp-mac="${client.espMac}">
-            <div class="name">${escapeHtml(client.nickname)}</div>
-            <div class="status"><span class="status-indicator"></span><span>${online === 'online' ? 'Online' : 'Offline'}</span></div>
+          <button type="button" class="device-card w-full rounded-lg border px-[9px] py-2 text-left text-white ${stateClasses}" data-esp-mac="${client.espMac}">
+            <div class="mb-[3px] text-[13px] font-semibold leading-tight">${escapeHtml(client.nickname)}</div>
+            <div class="inline-flex items-center gap-[5px] text-[11px] opacity-90">
+              <span class="h-[7px] w-[7px] rounded-full ${online === 'online' ? 'bg-green-400' : 'bg-red-400'}"></span>
+              <span>${online === 'online' ? 'Online' : 'Offline'}</span>
+            </div>
           </button>
         `;
       }).join('');
@@ -433,7 +386,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 
         const hex = rgbToHex(rgb);
         const button = document.createElement('button');
-        button.className = `swatch${hex === activeHex ? ' active' : ''}`;
+        button.className = `h-7 rounded-lg p-0 ${hex === activeHex ? 'ring-2 ring-inset ring-black/45' : ''}`;
         button.style.background = hex;
         button.title = hex;
         button.type = 'button';
@@ -453,7 +406,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 
       favorites.forEach((hex) => {
         const button = document.createElement('button');
-        button.className = `swatch${hex.toUpperCase() === activeHex ? ' active' : ''}`;
+        button.className = `h-7 rounded-lg p-0 ${hex.toUpperCase() === activeHex ? 'ring-2 ring-inset ring-black/45' : ''}`;
         button.style.background = hex;
         button.title = hex;
         button.type = 'button';
@@ -561,8 +514,8 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 
       pendingSend = false;
       sending = true;
-      status.className = 'status info';
-      status.innerHTML = '<div class="status-dot"></div><span>Enviando comando...</span>';
+      status.className = STATUS_INFO;
+      status.innerHTML = '<div class="h-2 w-2 animate-pulse rounded-full bg-current"></div><span>Enviando comando...</span>';
 
       try {
         const rgb = hsvToRgb(hue, saturation, value);
@@ -580,18 +533,18 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
         const data = await response.json();
         if (response.ok && typeof data.okCount === 'number') {
           if (data.failCount === 0) {
-            status.className = 'status success';
-            status.innerHTML = `<div class="status-dot"></div><span>✅ Cor aplicada em ${data.okCount} dispositivo(s)</span>`;
+            status.className = STATUS_SUCCESS;
+            status.innerHTML = `<div class="h-2 w-2 animate-pulse rounded-full bg-current"></div><span>✅ Cor aplicada em ${data.okCount} dispositivo(s)</span>`;
           } else {
-            status.className = 'status error';
-            status.innerHTML = `<div class="status-dot"></div><span>⚠️ Sucesso: ${data.okCount}, Falhas: ${data.failCount}</span>`;
+            status.className = STATUS_ERROR;
+            status.innerHTML = `<div class="h-2 w-2 animate-pulse rounded-full bg-current"></div><span>⚠️ Sucesso: ${data.okCount}, Falhas: ${data.failCount}</span>`;
           }
         } else {
           throw new Error(data.error || 'Erro desconhecido');
         }
       } catch (error) {
-        status.className = 'status error';
-        status.innerHTML = `<div class="status-dot"></div><span>❌ ${error.message}</span>`;
+        status.className = STATUS_ERROR;
+        status.innerHTML = `<div class="h-2 w-2 animate-pulse rounded-full bg-current"></div><span>❌ ${error.message}</span>`;
       } finally {
         sending = false;
         if (pendingSend) applyColor();

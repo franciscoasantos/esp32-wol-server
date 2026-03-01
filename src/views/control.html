@@ -4,63 +4,34 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Wake-on-LAN Control</title>
-<style>
-* { box-sizing: border-box; font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif; }
-body { margin: 0; background: linear-gradient(135deg, #0f172a, #020617); color: white; display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 16px; }
-.container { width: 100%; max-width: 520px; }
-.card { padding: 28px; background: rgba(255,255,255,0.05); backdrop-filter: blur(12px); border-radius: 14px; box-shadow: 0 10px 40px rgba(0,0,0,0.4); }
-h1 { margin: 0; font-size: 26px; }
-.subtitle { opacity: 0.7; margin: 8px 0 14px; font-size: 14px; }
-.field { margin-bottom: 14px; }
-label { display: block; font-size: 12px; opacity: 0.8; margin-bottom: 6px; text-transform: uppercase; letter-spacing: .4px; }
-input, select { width: 100%; padding: 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.2); background: rgba(255,255,255,0.08); color: white; }
-option { color: #111; }
-.device-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 14px; }
-.device-card { text-align: left; width: 100%; padding: 8px 9px; border-radius: 8px; border: 1px solid rgba(255,255,255,.2); background: rgba(255,255,255,.06); color: white; cursor: pointer; box-shadow: none; }
-.device-card:hover { background: rgba(255,255,255,.1); }
-.device-card.selected { border-color: #4CAF50; background: rgba(76, 175, 80, 0.2); }
-.device-card .name { font-weight: 600; font-size: 13px; line-height: 1.2; margin-bottom: 3px; }
-.device-card .status-row { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; opacity: .9; }
-.device-card .status-indicator { width: 7px; height: 7px; border-radius: 999px; background: #f87171; }
-.device-card.is-online .status-indicator { background: #4ade80; }
-.device-empty { grid-column: 1 / -1; padding: 10px; border-radius: 8px; background: rgba(255,255,255,.06); font-size: 13px; }
-.status { display: flex; align-items: center; gap: 8px; padding: 12px; border-radius: 8px; margin-bottom: 18px; font-size: 14px; }
-.status.info { background: rgba(59,130,246,.15); border: 1px solid rgba(59,130,246,.3); color: #60a5fa; }
-.status.success { background: rgba(34,197,94,.15); border: 1px solid rgba(34,197,94,.3); color: #4ade80; }
-.status.error { background: rgba(239,68,68,.15); border: 1px solid rgba(239,68,68,.3); color: #f87171; }
-.status-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
-button { width: 100%; padding: 14px; border: none; border-radius: 10px; font-size: 16px; font-weight: 600; background: linear-gradient(135deg, #4CAF50, #43a047); color: white; cursor: pointer; }
-button:disabled { opacity: .5; cursor: not-allowed; }
-.links { margin-top: 16px; text-align: center; display: flex; justify-content: center; gap: 14px; }
-.links a { color: rgba(255,255,255,.75); text-decoration: none; font-size: 14px; }
-@media (max-width: 420px) { .device-list { grid-template-columns: 1fr; } }
-</style>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>option { color: #111; }</style>
 </head>
-<body>
-  <div class="container">
-    <div class="card">
-      <h1>⚡ Wake-on-LAN</h1>
-      <p class="subtitle">Escolha um ou vários dispositivos para enviar WoL</p>
+<body class="m-0 flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-900 to-slate-950 p-4 text-white">
+  <div class="w-full max-w-[520px]">
+    <div class="rounded-2xl border border-white/10 bg-white/5 p-7 text-white shadow-[0_10px_40px_rgba(0,0,0,0.4)] backdrop-blur-xl">
+      <h1 class="m-0 text-[26px] font-semibold">⚡ Wake-on-LAN</h1>
+      <p class="mb-3.5 mt-2 text-sm opacity-70">Escolha um ou vários dispositivos para enviar WoL</p>
 
-      <div id="deviceList" class="device-list"></div>
+      <div id="deviceList" class="mb-3.5 grid grid-cols-2 gap-2 max-[420px]:grid-cols-1"></div>
 
-      <div class="field">
-        <label for="wolTargetSelect">Dispositivo WoL</label>
-        <select id="wolTargetSelect"></select>
+      <div class="mb-3.5">
+        <label for="wolTargetSelect" class="mb-1.5 block text-[12px] uppercase tracking-[0.4px] opacity-80">Dispositivo WoL</label>
+        <select id="wolTargetSelect" class="w-full rounded-lg border border-white/20 bg-white/10 px-3 py-3 text-white"></select>
       </div>
 
-      <div id="status" class="status info">
-        <div class="status-dot"></div>
+      <div id="status" class="mb-[18px] flex items-center gap-2 rounded-lg border border-blue-400/30 bg-blue-500/15 p-3 text-sm text-blue-300">
+        <div class="h-2 w-2 animate-pulse rounded-full bg-current"></div>
         <span>Aguardando ação...</span>
       </div>
 
-      <button id="wolBtn" onclick="sendWOL()" disabled>🚀 Ligar Dispositivo(s)</button>
+      <button id="wolBtn" onclick="sendWOL()" disabled class="w-full rounded-[10px] bg-gradient-to-br from-green-500 to-green-600 px-4 py-3.5 text-base font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">🚀 Ligar Dispositivo(s)</button>
 
-      <div class="links">
-        <a href="/led">Controle de LED</a>
-        <a href="/config">Configuração</a>
-        <a href="/wol-targets">MACs WoL</a>
-        <a href="/logout">Sair</a>
+      <div class="mt-4 flex justify-center gap-3.5 text-center">
+        <a class="text-sm text-white/75 hover:text-white" href="/led">Controle de LED</a>
+        <a class="text-sm text-white/75 hover:text-white" href="/config">Configuração</a>
+        <a class="text-sm text-white/75 hover:text-white" href="/wol-targets">MACs WoL</a>
+        <a class="text-sm text-white/75 hover:text-white" href="/logout">Sair</a>
       </div>
     </div>
   </div>
@@ -76,6 +47,10 @@ button:disabled { opacity: .5; cursor: not-allowed; }
   let connectedClients = new Set();
   let selectedEspMacs = new Set();
   let wolTargets = [];
+  const STATUS_BASE = 'mb-[18px] flex items-center gap-2 rounded-lg p-3 text-sm';
+  const STATUS_INFO = `${STATUS_BASE} border border-blue-400/30 bg-blue-500/15 text-blue-300`;
+  const STATUS_SUCCESS = `${STATUS_BASE} border border-green-400/30 bg-green-500/15 text-green-300`;
+  const STATUS_ERROR = `${STATUS_BASE} border border-red-400/30 bg-red-500/15 text-red-300`;
 
   function selectedClients() {
     return clients.filter((client) => selectedEspMacs.has(client.espMac));
@@ -94,17 +69,23 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 
   function renderDeviceList() {
     if (!clients.length) {
-      deviceList.innerHTML = '<div class="device-empty">Nenhum cliente cadastrado.</div>';
+      deviceList.innerHTML = '<div class="col-span-full rounded-lg bg-white/10 p-2.5 text-[13px]">Nenhum cliente cadastrado.</div>';
       return;
     }
 
     deviceList.innerHTML = clients.map((client) => {
       const selected = selectedEspMacs.has(client.espMac) ? 'selected' : '';
       const online = connectedClients.has(client.espMac) ? 'online' : 'offline';
+      const stateClasses = selected
+        ? 'border-green-500 bg-green-500/20'
+        : 'border-white/20 bg-white/5 hover:bg-white/10';
       return `
-        <button type="button" class="device-card ${selected} ${online === 'online' ? 'is-online' : 'is-offline'}" data-esp-mac="${client.espMac}">
-          <div class="name">${escapeHtml(client.nickname)}</div>
-          <div class="status-row"><span class="status-indicator"></span><span>${online === 'online' ? 'Online' : 'Offline'}</span></div>
+        <button type="button" class="device-card w-full rounded-lg border px-[9px] py-2 text-left text-white ${stateClasses}" data-esp-mac="${client.espMac}">
+          <div class="mb-[3px] text-[13px] font-semibold leading-tight">${escapeHtml(client.nickname)}</div>
+          <div class="inline-flex items-center gap-[5px] text-[11px] opacity-90">
+            <span class="h-[7px] w-[7px] rounded-full ${online === 'online' ? 'bg-green-400' : 'bg-red-400'}"></span>
+            <span>${online === 'online' ? 'Online' : 'Offline'}</span>
+          </div>
         </button>
       `;
     }).join('');
@@ -184,8 +165,8 @@ button:disabled { opacity: .5; cursor: not-allowed; }
     if (!selectedEspMacs.size) return;
 
     wolBtn.disabled = true;
-    status.className = 'status info';
-    status.innerHTML = '<div class="status-dot"></div><span>Enviando comando...</span>';
+    status.className = STATUS_INFO;
+    status.innerHTML = '<div class="h-2 w-2 animate-pulse rounded-full bg-current"></div><span>Enviando comando...</span>';
 
     try {
       const targetMac = wolTargetSelect.value;
@@ -207,18 +188,18 @@ button:disabled { opacity: .5; cursor: not-allowed; }
       const data = await response.json();
       if (response.ok && typeof data.okCount === 'number') {
         if (data.failCount === 0) {
-          status.className = 'status success';
-          status.innerHTML = `<div class="status-dot"></div><span>✅ Comando enviado para ${data.okCount} dispositivo(s)</span>`;
+          status.className = STATUS_SUCCESS;
+          status.innerHTML = `<div class="h-2 w-2 animate-pulse rounded-full bg-current"></div><span>✅ Comando enviado para ${data.okCount} dispositivo(s)</span>`;
         } else {
-          status.className = 'status error';
-          status.innerHTML = `<div class="status-dot"></div><span>⚠️ Sucesso: ${data.okCount}, Falhas: ${data.failCount}</span>`;
+          status.className = STATUS_ERROR;
+          status.innerHTML = `<div class="h-2 w-2 animate-pulse rounded-full bg-current"></div><span>⚠️ Sucesso: ${data.okCount}, Falhas: ${data.failCount}</span>`;
         }
       } else {
         throw new Error(data.error || 'Erro desconhecido');
       }
     } catch (error) {
-      status.className = 'status error';
-      status.innerHTML = `<div class="status-dot"></div><span>❌ ${error.message}</span>`;
+      status.className = STATUS_ERROR;
+      status.innerHTML = `<div class="h-2 w-2 animate-pulse rounded-full bg-current"></div><span>❌ ${error.message}</span>`;
     } finally {
       updateSelectionState();
     }

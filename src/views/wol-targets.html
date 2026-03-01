@@ -4,64 +4,41 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Cadastro de MAC WoL</title>
-<style>
-* { box-sizing: border-box; font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif; }
-body { margin: 0; background: linear-gradient(135deg, #0f172a, #020617); color: white; display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 16px; }
-.container { width: 100%; max-width: 700px; }
-.card { padding: 28px; background: rgba(255,255,255,0.05); backdrop-filter: blur(12px); border-radius: 14px; box-shadow: 0 10px 40px rgba(0,0,0,0.4); }
-h1 { margin: 0 0 8px; font-size: 26px; }
-.subtitle { opacity: 0.7; margin-bottom: 20px; font-size: 14px; }
-.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.field { margin-bottom: 12px; }
-label { display: block; font-size: 12px; opacity: 0.8; margin-bottom: 6px; text-transform: uppercase; letter-spacing: .4px; }
-input { width: 100%; padding: 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.2); background: rgba(255,255,255,0.08); color: white; }
-.targets { background: rgba(255,255,255,0.08); border-radius: 8px; padding: 12px; margin-bottom: 16px; max-height: 220px; overflow: auto; }
-.target-item { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; padding: 8px; border-radius: 8px; background: rgba(255,255,255,0.06); }
-.target-item button { width: auto; padding: 6px 10px; font-size: 13px; border-radius: 8px; background: rgba(255,255,255,0.2); }
-.status { display: flex; align-items: center; gap: 8px; padding: 12px; border-radius: 8px; margin: 16px 0; font-size: 14px; }
-.status.info { background: rgba(59,130,246,.15); border: 1px solid rgba(59,130,246,.3); color: #60a5fa; }
-.status.success { background: rgba(34,197,94,.15); border: 1px solid rgba(34,197,94,.3); color: #4ade80; }
-.status.error { background: rgba(239,68,68,.15); border: 1px solid rgba(239,68,68,.3); color: #f87171; }
-.status-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
-button { width: 100%; padding: 14px; border: none; border-radius: 10px; font-size: 16px; font-weight: 600; background: linear-gradient(135deg, #4CAF50, #43a047); color: white; cursor: pointer; }
-.links { margin-top: 14px; text-align: center; display: flex; justify-content: center; gap: 14px; }
-.links a { color: rgba(255,255,255,.75); text-decoration: none; font-size: 14px; }
-@media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
-</style>
+<script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body>
-  <div class="container">
-    <div class="card">
-      <h1>📝 Cadastro MAC WoL</h1>
-      <p class="subtitle">Cadastre os MAC addresses dos dispositivos que podem receber Wake-on-LAN</p>
+<body class="m-0 flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-900 to-slate-950 p-4 text-white">
+  <div class="w-full max-w-[700px]">
+    <div class="rounded-2xl border border-white/10 bg-white/5 p-7 shadow-[0_10px_40px_rgba(0,0,0,0.4)] backdrop-blur-xl">
+      <h1 class="mb-2 mt-0 text-[26px] font-semibold">📝 Cadastro MAC WoL</h1>
+      <p class="mb-5 text-sm opacity-70">Cadastre os MAC addresses dos dispositivos que podem receber Wake-on-LAN</p>
 
-      <div class="targets" id="targetsList">Carregando alvos WoL...</div>
+      <div class="mb-4 max-h-[220px] overflow-auto rounded-lg bg-white/10 p-3" id="targetsList">Carregando alvos WoL...</div>
 
       <form id="targetForm">
-        <div class="grid">
-          <div class="field">
-            <label for="nickname">Apelido</label>
-            <input id="nickname" placeholder="PC Sala / NAS / Servidor" required />
+        <div class="grid grid-cols-2 gap-3 max-[760px]:grid-cols-1">
+          <div class="mb-3">
+            <label class="mb-1.5 block text-[12px] uppercase tracking-[0.4px] opacity-80" for="nickname">Apelido</label>
+            <input id="nickname" class="w-full rounded-lg border border-white/20 bg-white/10 px-3 py-3 text-white" placeholder="PC Sala / NAS / Servidor" required />
           </div>
-          <div class="field">
-            <label for="mac">MAC address</label>
-            <input id="mac" placeholder="AA:BB:CC:DD:EE:FF" required />
+          <div class="mb-3">
+            <label class="mb-1.5 block text-[12px] uppercase tracking-[0.4px] opacity-80" for="mac">MAC address</label>
+            <input id="mac" class="w-full rounded-lg border border-white/20 bg-white/10 px-3 py-3 text-white" placeholder="AA:BB:CC:DD:EE:FF" required />
           </div>
         </div>
 
-        <div id="status" class="status info">
-          <div class="status-dot"></div>
+        <div id="status" class="my-4 flex items-center gap-2 rounded-lg border border-blue-400/30 bg-blue-500/15 p-3 text-sm text-blue-300">
+          <div class="h-2 w-2 rounded-full bg-current"></div>
           <span>Preencha os dados e salve.</span>
         </div>
 
-        <button type="submit">Salvar MAC WoL</button>
+        <button class="w-full rounded-[10px] bg-gradient-to-br from-green-500 to-green-600 px-4 py-3.5 text-base font-semibold text-white" type="submit">Salvar MAC WoL</button>
       </form>
 
-      <div class="links">
-        <a href="/">Wake-on-LAN</a>
-        <a href="/led">Controle de LED</a>
-        <a href="/config">Configuração</a>
-        <a href="/logout">Sair</a>
+      <div class="mt-3.5 flex justify-center gap-3.5 text-center">
+        <a class="text-sm text-white/75 hover:text-white" href="/">Wake-on-LAN</a>
+        <a class="text-sm text-white/75 hover:text-white" href="/led">Controle de LED</a>
+        <a class="text-sm text-white/75 hover:text-white" href="/config">Configuração</a>
+        <a class="text-sm text-white/75 hover:text-white" href="/logout">Sair</a>
       </div>
     </div>
   </div>
@@ -74,10 +51,16 @@ button { width: 100%; padding: 14px; border: none; border-radius: 10px; font-siz
   const macInput = document.getElementById('mac');
 
   let targets = [];
+  const STATUS_BASE = 'my-4 flex items-center gap-2 rounded-lg p-3 text-sm';
+  const STATUS_INFO = `${STATUS_BASE} border border-blue-400/30 bg-blue-500/15 text-blue-300`;
+  const STATUS_SUCCESS = `${STATUS_BASE} border border-green-400/30 bg-green-500/15 text-green-300`;
+  const STATUS_ERROR = `${STATUS_BASE} border border-red-400/30 bg-red-500/15 text-red-300`;
 
   function setStatus(type, message) {
-    status.className = `status ${type}`;
-    status.innerHTML = `<div class="status-dot"></div><span>${message}</span>`;
+    if (type === 'success') status.className = STATUS_SUCCESS;
+    else if (type === 'error') status.className = STATUS_ERROR;
+    else status.className = STATUS_INFO;
+    status.innerHTML = `<div class="h-2 w-2 rounded-full bg-current"></div><span>${message}</span>`;
   }
 
   function renderTargets() {
@@ -87,9 +70,9 @@ button { width: 100%; padding: 14px; border: none; border-radius: 10px; font-siz
     }
 
     targetsList.innerHTML = targets.map((target) => `
-      <div class="target-item">
+      <div class="mb-1.5 flex items-center justify-between rounded-lg bg-white/5 p-2">
         <span>${target.nickname} (${target.mac})</span>
-        <button type="button" onclick="editTarget('${target.mac}')">Editar</button>
+        <button class="w-auto rounded-lg bg-white/20 px-2.5 py-1.5 text-[13px]" type="button" onclick="editTarget('${target.mac}')">Editar</button>
       </div>
     `).join('');
   }
