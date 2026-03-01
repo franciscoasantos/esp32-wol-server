@@ -196,33 +196,28 @@ async function handleWOL(req, res) {
       return sendJson(res, 400, { error: 'MAC alvo inválido' });
     }
 
-    const results = [];
-
-    for (const espMac of targets) {
+    const targetMac = explicitMac || targetMacFromList;
+    const results = await Promise.all(targets.map(async (espMac) => {
       const client = getClientByMac(espMac);
       if (!client) {
-        results.push({ espMac, ok: false, error: 'Cliente não encontrado' });
-        continue;
+        return { espMac, ok: false, error: 'Cliente não encontrado' };
       }
 
-      const targetMac = explicitMac || targetMacFromList;
       if (!targetMac) {
-        results.push({ espMac, ok: false, error: 'MAC alvo não informado' });
-        continue;
+        return { espMac, ok: false, error: 'MAC alvo não informado' };
       }
 
       try {
         const response = await sendCommandToESP(espMac, { action: 'wol', mac: targetMac });
         if (response?.status === 'error') {
-          results.push({ espMac, ok: false, error: response.error || 'Falha na comunicação com ESP' });
-          continue;
+          return { espMac, ok: false, error: response.error || 'Falha na comunicação com ESP' };
         }
 
-        results.push({ espMac, ok: true, response });
+        return { espMac, ok: true, response };
       } catch (error) {
-        results.push({ espMac, ok: false, error: error.message });
+        return { espMac, ok: false, error: error.message };
       }
-    }
+    }));
 
     return sendJson(res, 200, buildResultSummary('wol', results));
   } catch (error) {
@@ -239,13 +234,10 @@ async function handleLED(req, res) {
     const color = parseRgb(body);
     const white = parseWhite(body);
 
-    const results = [];
-
-    for (const espMac of targets) {
+    const results = await Promise.all(targets.map(async (espMac) => {
       const client = getClientByMac(espMac);
       if (!client) {
-        results.push({ espMac, ok: false, error: 'Cliente não encontrado' });
-        continue;
+        return { espMac, ok: false, error: 'Cliente não encontrado' };
       }
 
       try {
@@ -256,15 +248,14 @@ async function handleLED(req, res) {
 
         const response = await sendCommandToESP(espMac, command);
         if (response?.status === 'error') {
-          results.push({ espMac, ok: false, error: response.error || 'Falha na comunicação com ESP' });
-          continue;
+          return { espMac, ok: false, error: response.error || 'Falha na comunicação com ESP' };
         }
 
-        results.push({ espMac, ok: true, response });
+        return { espMac, ok: true, response };
       } catch (error) {
-        results.push({ espMac, ok: false, error: error.message });
+        return { espMac, ok: false, error: error.message };
       }
-    }
+    }));
 
     return sendJson(res, 200, buildResultSummary('led', results));
   } catch (error) {
