@@ -9,14 +9,21 @@
 body { margin: 0; background: linear-gradient(135deg, #0f172a, #020617); color: white; display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 16px; }
 .container { width: 100%; max-width: 520px; }
 .card { padding: 28px; background: rgba(255,255,255,0.05); backdrop-filter: blur(12px); border-radius: 14px; box-shadow: 0 10px 40px rgba(0,0,0,0.4); }
-.top-row { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom: 8px; }
 h1 { margin: 0; font-size: 26px; }
-.subtitle { opacity: 0.7; margin-bottom: 20px; font-size: 14px; }
+.subtitle { opacity: 0.7; margin: 8px 0 14px; font-size: 14px; }
 .field { margin-bottom: 14px; }
 label { display: block; font-size: 12px; opacity: 0.8; margin-bottom: 6px; text-transform: uppercase; letter-spacing: .4px; }
 input, select { width: 100%; padding: 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.2); background: rgba(255,255,255,0.08); color: white; }
 option { color: #111; }
-.client-meta { background: rgba(255,255,255,0.08); border-radius: 8px; padding: 12px; margin-bottom: 16px; font-size: 13px; }
+.device-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 14px; }
+.device-card { text-align: left; width: 100%; padding: 8px 9px; border-radius: 8px; border: 1px solid rgba(255,255,255,.2); background: rgba(255,255,255,.06); color: white; cursor: pointer; box-shadow: none; }
+.device-card:hover { background: rgba(255,255,255,.1); }
+.device-card.selected { border-color: #4CAF50; background: rgba(76, 175, 80, 0.2); }
+.device-card .name { font-weight: 600; font-size: 13px; line-height: 1.2; margin-bottom: 3px; }
+.device-card .status-row { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; opacity: .9; }
+.device-card .status-indicator { width: 7px; height: 7px; border-radius: 999px; background: #f87171; }
+.device-card.is-online .status-indicator { background: #4ade80; }
+.device-empty { grid-column: 1 / -1; padding: 10px; border-radius: 8px; background: rgba(255,255,255,.06); font-size: 13px; }
 .status { display: flex; align-items: center; gap: 8px; padding: 12px; border-radius: 8px; margin-bottom: 18px; font-size: 14px; }
 .status.info { background: rgba(59,130,246,.15); border: 1px solid rgba(59,130,246,.3); color: #60a5fa; }
 .status.success { background: rgba(34,197,94,.15); border: 1px solid rgba(34,197,94,.3); color: #4ade80; }
@@ -24,32 +31,18 @@ option { color: #111; }
 .status-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
 button { width: 100%; padding: 14px; border: none; border-radius: 10px; font-size: 16px; font-weight: 600; background: linear-gradient(135deg, #4CAF50, #43a047); color: white; cursor: pointer; }
 button:disabled { opacity: .5; cursor: not-allowed; }
-.device-btn { width: auto; padding: 8px 12px; font-size: 14px; border-radius: 8px; background: rgba(255,255,255,0.2); }
 .links { margin-top: 16px; text-align: center; display: flex; justify-content: center; gap: 14px; }
 .links a { color: rgba(255,255,255,.75); text-decoration: none; font-size: 14px; }
-.modal-backdrop { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,.5); padding: 16px; }
-.modal { width: 100%; max-width: 520px; background: #0f172a; border: 1px solid rgba(255,255,255,.2); border-radius: 12px; padding: 16px; }
-.modal h2 { margin: 0 0 12px; font-size: 20px; }
-.device-list { max-height: 260px; overflow: auto; margin-bottom: 14px; }
-.device-item { display: flex; align-items: center; gap: 10px; padding: 10px; border-radius: 8px; background: rgba(255,255,255,.06); margin-bottom: 8px; }
-.device-item .meta { font-size: 12px; opacity: .8; }
-.modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
-.modal-actions button { width: auto; padding: 8px 12px; font-size: 14px; border-radius: 8px; }
-.modal-actions .secondary { background: rgba(255,255,255,.2); }
-.quick-actions { display: flex; gap: 8px; margin-right: auto; }
-.quick-actions button { background: rgba(255,255,255,.2); }
+@media (max-width: 420px) { .device-list { grid-template-columns: 1fr; } }
 </style>
 </head>
 <body>
   <div class="container">
     <div class="card">
-      <div class="top-row">
-        <h1>⚡ Wake-on-LAN</h1>
-        <button class="device-btn" onclick="openDeviceModal()">Dispositivos</button>
-      </div>
+      <h1>⚡ Wake-on-LAN</h1>
       <p class="subtitle">Escolha um ou vários dispositivos para enviar WoL</p>
 
-      <div id="clientMeta" class="client-meta">Nenhum dispositivo selecionado.</div>
+      <div id="deviceList" class="device-list"></div>
 
       <div class="field">
         <label for="wolTargetSelect">Dispositivo WoL</label>
@@ -72,73 +65,58 @@ button:disabled { opacity: .5; cursor: not-allowed; }
     </div>
   </div>
 
-  <div id="deviceModal" class="modal-backdrop" onclick="onBackdropClick(event)">
-    <div class="modal">
-      <h2>Selecionar dispositivos</h2>
-      <div id="deviceList" class="device-list"></div>
-      <div class="modal-actions">
-        <div class="quick-actions">
-          <button class="secondary" onclick="selectOnlineInModal()">Selecionar online</button>
-          <button class="secondary" onclick="clearModalSelection()">Limpar</button>
-        </div>
-        <button class="secondary" onclick="closeDeviceModal()">Cancelar</button>
-        <button onclick="applyDeviceSelection()">Aplicar</button>
-      </div>
-    </div>
-  </div>
-
 <script>
   const eventSource = new EventSource('/api/status');
-  const clientMeta = document.getElementById('clientMeta');
   const status = document.getElementById('status');
   const wolTargetSelect = document.getElementById('wolTargetSelect');
   const wolBtn = document.getElementById('wolBtn');
-  const deviceModal = document.getElementById('deviceModal');
   const deviceList = document.getElementById('deviceList');
 
   let clients = [];
   let connectedClients = new Set();
   let selectedEspMacs = new Set();
-  let tempSelectedEspMacs = new Set();
   let wolTargets = [];
 
   function selectedClients() {
     return clients.filter((client) => selectedEspMacs.has(client.espMac));
   }
 
-  function updateClientMeta() {
+  function updateSelectionState() {
     const selected = selectedClients();
     if (!selected.length) {
-      clientMeta.textContent = 'Nenhum dispositivo selecionado.';
       wolBtn.disabled = true;
       return;
     }
 
     const onlineCount = selected.filter((client) => connectedClients.has(client.espMac)).length;
-    const names = selected.map((client) => client.nickname).join(', ');
-    clientMeta.textContent = `Selecionados (${selected.length}): ${names} • Online: ${onlineCount}/${selected.length}`;
     wolBtn.disabled = onlineCount === 0;
   }
 
   function renderDeviceList() {
     if (!clients.length) {
-      deviceList.innerHTML = '<div class="device-item">Nenhum cliente cadastrado.</div>';
+      deviceList.innerHTML = '<div class="device-empty">Nenhum cliente cadastrado.</div>';
       return;
     }
 
     deviceList.innerHTML = clients.map((client) => {
-      const checked = tempSelectedEspMacs.has(client.espMac) ? 'checked' : '';
+      const selected = selectedEspMacs.has(client.espMac) ? 'selected' : '';
       const online = connectedClients.has(client.espMac) ? 'online' : 'offline';
       return `
-        <label class="device-item">
-          <input type="checkbox" value="${client.espMac}" ${checked} />
-          <div>
-            <div>${client.nickname} (${client.espMac})</div>
-            <div class="meta">ESP ${online}</div>
-          </div>
-        </label>
+        <button type="button" class="device-card ${selected} ${online === 'online' ? 'is-online' : 'is-offline'}" data-esp-mac="${client.espMac}">
+          <div class="name">${escapeHtml(client.nickname)}</div>
+          <div class="status-row"><span class="status-indicator"></span><span>${online === 'online' ? 'Online' : 'Offline'}</span></div>
+        </button>
       `;
     }).join('');
+  }
+
+  function escapeHtml(value) {
+    return String(value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
   }
 
   function renderWolTargets() {
@@ -166,7 +144,8 @@ button:disabled { opacity: .5; cursor: not-allowed; }
       selectedEspMacs.add(clients[0].espMac);
     }
 
-    updateClientMeta();
+    renderDeviceList();
+    updateSelectionState();
   }
 
   async function loadWolTargets() {
@@ -176,50 +155,25 @@ button:disabled { opacity: .5; cursor: not-allowed; }
     renderWolTargets();
   }
 
-  function openDeviceModal() {
-    tempSelectedEspMacs = new Set(selectedEspMacs);
+  deviceList.addEventListener('click', (event) => {
+    const card = event.target.closest('.device-card');
+    if (!card) return;
+
+    const espMac = card.dataset.espMac;
+    if (!espMac) return;
+
+    if (selectedEspMacs.has(espMac)) selectedEspMacs.delete(espMac);
+    else selectedEspMacs.add(espMac);
+
     renderDeviceList();
-    deviceModal.style.display = 'flex';
-  }
-
-  function closeDeviceModal() {
-    deviceModal.style.display = 'none';
-  }
-
-  function onBackdropClick(event) {
-    if (event.target === deviceModal) {
-      closeDeviceModal();
-    }
-  }
-
-  function applyDeviceSelection() {
-    const checkboxes = deviceList.querySelectorAll('input[type="checkbox"]');
-    const next = new Set();
-    checkboxes.forEach((checkbox) => {
-      if (checkbox.checked) next.add(checkbox.value);
-    });
-
-    selectedEspMacs = next;
-    updateClientMeta();
-    closeDeviceModal();
-  }
-
-  function selectOnlineInModal() {
-    tempSelectedEspMacs = new Set(clients
-      .filter((client) => connectedClients.has(client.espMac))
-      .map((client) => client.espMac));
-    renderDeviceList();
-  }
-
-  function clearModalSelection() {
-    tempSelectedEspMacs = new Set();
-    renderDeviceList();
-  }
+    updateSelectionState();
+  });
 
   eventSource.addEventListener('status', (event) => {
     const data = JSON.parse(event.data);
     connectedClients = new Set(data.connectedClients || []);
-    updateClientMeta();
+    renderDeviceList();
+    updateSelectionState();
   });
 
   eventSource.onerror = () => {
@@ -266,7 +220,7 @@ button:disabled { opacity: .5; cursor: not-allowed; }
       status.className = 'status error';
       status.innerHTML = `<div class="status-dot"></div><span>❌ ${error.message}</span>`;
     } finally {
-      updateClientMeta();
+      updateSelectionState();
     }
   }
 
