@@ -9,6 +9,7 @@ const clients = new Map();
 const clientDetails = new Map();
 const statusChangeCallbacks = [];
 const commandQueues = new Map();
+let tunnelServer = null;
 
 function formatWsPayload(payload) {
   if (typeof payload === 'string') return payload;
@@ -146,7 +147,12 @@ function normalizeIp(value) {
 }
 
 function initializeTunnel() {
+  if (tunnelServer) {
+    return tunnelServer;
+  }
+
   const wss = new WebSocket.Server({ port: TUNNEL_PORT });
+  tunnelServer = wss;
 
   wss.on('connection', (ws, request) => {
     logger.info('Incoming ESP WebSocket connection...');
@@ -293,6 +299,7 @@ function initializeTunnel() {
   });
 
   logger.info(`WebSocket tunnel listening on ${TUNNEL_PORT}`);
+  return tunnelServer;
 }
 
 module.exports = {

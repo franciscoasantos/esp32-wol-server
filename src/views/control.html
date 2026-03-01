@@ -7,13 +7,16 @@
 <script src="https://cdn.tailwindcss.com"></script>
 <style>option { color: #111; }</style>
 </head>
-<body class="m-0 flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-900 to-slate-950 p-4 text-white">
-  <div class="w-full max-w-[520px]">
-    <div class="rounded-2xl border border-white/10 bg-white/5 p-7 text-white shadow-[0_10px_40px_rgba(0,0,0,0.4)] backdrop-blur-xl">
-      <h1 class="m-0 text-[26px] font-semibold">⚡ Wake-on-LAN</h1>
-      <p class="mb-3.5 mt-2 text-sm opacity-70">Escolha um ou vários dispositivos para enviar WoL</p>
+<body class="m-0 min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 text-slate-100">
+  <!--APP_HEADER-->
 
-      <div id="deviceList" class="mb-3.5 grid grid-cols-2 gap-2 max-[420px]:grid-cols-1"></div>
+  <main class="mx-auto w-full max-w-[700px] px-4 py-6">
+
+    <div class="p-7 text-white">
+      <h1 class="mb-2 mt-0 text-[26px] font-semibold">⚡ Wake-on-LAN</h1>
+      <p class="mb-5 text-sm opacity-70">Escolha um ou vários dispositivos para enviar WoL</p>
+
+      <!--DEVICE_SELECTOR-->
 
       <div class="mb-3.5">
         <label for="wolTargetSelect" class="mb-1.5 block text-[12px] uppercase tracking-[0.4px] opacity-80">Dispositivo WoL</label>
@@ -26,15 +29,8 @@
       </div>
 
       <button id="wolBtn" onclick="sendWOL()" disabled class="w-full rounded-[10px] bg-gradient-to-br from-green-500 to-green-600 px-4 py-3.5 text-base font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">🚀 Ligar Dispositivo(s)</button>
-
-      <div class="mt-4 flex justify-center gap-3.5 text-center">
-        <a class="text-sm text-white/75 hover:text-white" href="/led">Controle de LED</a>
-        <a class="text-sm text-white/75 hover:text-white" href="/config">Configuração</a>
-        <a class="text-sm text-white/75 hover:text-white" href="/wol-targets">MACs WoL</a>
-        <a class="text-sm text-white/75 hover:text-white" href="/logout">Sair</a>
-      </div>
     </div>
-  </div>
+  </main>
 
 <script>
   const eventSource = new EventSource('/api/status');
@@ -42,15 +38,25 @@
   const wolTargetSelect = document.getElementById('wolTargetSelect');
   const wolBtn = document.getElementById('wolBtn');
   const deviceList = document.getElementById('deviceList');
+  const mobileMenuBtn = document.getElementById('mobileMenuBtn');
+  const topNav = document.getElementById('topNav');
+
+  if (mobileMenuBtn && topNav) {
+    mobileMenuBtn.addEventListener('click', () => {
+      topNav.classList.toggle('hidden');
+      const expanded = mobileMenuBtn.getAttribute('aria-expanded') === 'true';
+      mobileMenuBtn.setAttribute('aria-expanded', String(!expanded));
+    });
+  }
 
   let clients = [];
   let connectedClients = new Set();
   let selectedEspMacs = new Set();
   let wolTargets = [];
   const STATUS_BASE = 'mb-[18px] flex items-center gap-2 rounded-lg p-3 text-sm';
-  const STATUS_INFO = `${STATUS_BASE} border border-blue-400/30 bg-blue-500/15 text-blue-300`;
-  const STATUS_SUCCESS = `${STATUS_BASE} border border-green-400/30 bg-green-500/15 text-green-300`;
-  const STATUS_ERROR = `${STATUS_BASE} border border-red-400/30 bg-red-500/15 text-red-300`;
+  const STATUS_CLASSES = getStatusClasses(STATUS_BASE);
+  /* STATUS_HELPERS */
+  /* DEVICE_SELECTOR_HELPERS */
 
   function selectedClients() {
     return clients.filter((client) => selectedEspMacs.has(client.espMac));
@@ -68,36 +74,7 @@
   }
 
   function renderDeviceList() {
-    if (!clients.length) {
-      deviceList.innerHTML = '<div class="col-span-full rounded-lg bg-white/10 p-2.5 text-[13px]">Nenhum cliente cadastrado.</div>';
-      return;
-    }
-
-    deviceList.innerHTML = clients.map((client) => {
-      const selected = selectedEspMacs.has(client.espMac) ? 'selected' : '';
-      const online = connectedClients.has(client.espMac) ? 'online' : 'offline';
-      const stateClasses = selected
-        ? 'border-green-500 bg-green-500/20'
-        : 'border-white/20 bg-white/5 hover:bg-white/10';
-      return `
-        <button type="button" class="device-card w-full rounded-lg border px-[9px] py-2 text-left text-white ${stateClasses}" data-esp-mac="${client.espMac}">
-          <div class="mb-[3px] text-[13px] font-semibold leading-tight">${escapeHtml(client.nickname)}</div>
-          <div class="inline-flex items-center gap-[5px] text-[11px] opacity-90">
-            <span class="h-[7px] w-[7px] rounded-full ${online === 'online' ? 'bg-green-400' : 'bg-red-400'}"></span>
-            <span>${online === 'online' ? 'Online' : 'Offline'}</span>
-          </div>
-        </button>
-      `;
-    }).join('');
-  }
-
-  function escapeHtml(value) {
-    return String(value)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;');
+    renderDeviceSelectorCards(deviceList, clients, selectedEspMacs, connectedClients);
   }
 
   function renderWolTargets() {
@@ -165,8 +142,7 @@
     if (!selectedEspMacs.size) return;
 
     wolBtn.disabled = true;
-    status.className = STATUS_INFO;
-    status.innerHTML = '<div class="h-2 w-2 animate-pulse rounded-full bg-current"></div><span>Enviando comando...</span>';
+    setStatusUI(status, STATUS_CLASSES, 'info', 'Enviando comando...', true);
 
     try {
       const targetMac = wolTargetSelect.value;
@@ -188,18 +164,15 @@
       const data = await response.json();
       if (response.ok && typeof data.okCount === 'number') {
         if (data.failCount === 0) {
-          status.className = STATUS_SUCCESS;
-          status.innerHTML = `<div class="h-2 w-2 animate-pulse rounded-full bg-current"></div><span>✅ Comando enviado para ${data.okCount} dispositivo(s)</span>`;
+          setStatusUI(status, STATUS_CLASSES, 'success', `✅ Comando enviado para ${data.okCount} dispositivo(s)`, true);
         } else {
-          status.className = STATUS_ERROR;
-          status.innerHTML = `<div class="h-2 w-2 animate-pulse rounded-full bg-current"></div><span>⚠️ Sucesso: ${data.okCount}, Falhas: ${data.failCount}</span>`;
+          setStatusUI(status, STATUS_CLASSES, 'error', `⚠️ Sucesso: ${data.okCount}, Falhas: ${data.failCount}`, true);
         }
       } else {
         throw new Error(data.error || 'Erro desconhecido');
       }
     } catch (error) {
-      status.className = STATUS_ERROR;
-      status.innerHTML = `<div class="h-2 w-2 animate-pulse rounded-full bg-current"></div><span>❌ ${error.message}</span>`;
+      setStatusUI(status, STATUS_CLASSES, 'error', `❌ ${error.message}`, true);
     } finally {
       updateSelectionState();
     }

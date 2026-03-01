@@ -59,8 +59,13 @@ const httpServer = http.createServer((req, res) => {
     return res.end();
   }
 
-  // CONTROL PAGE
+  // HOME PAGE (LED)
   if (req.url === "/" && req.method === "GET") {
+    return handleLEDPage(req, res);
+  }
+
+  // CONTROL PAGE (WOL)
+  if (req.url === "/wol" && req.method === "GET") {
     return handleHome(req, res);
   }
 
