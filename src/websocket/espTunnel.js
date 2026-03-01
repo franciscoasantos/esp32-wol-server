@@ -57,7 +57,10 @@ function getESPWebSocket(espMac) {
 function enqueueCommand(espMac, operation) {
   const normalized = normalizeMac(espMac);
   if (!normalized) {
-    return Promise.reject(new Error('MAC inválido'));
+    return Promise.resolve({
+      status: 'error',
+      error: 'MAC inválido'
+    });
   }
 
   const previous = commandQueues.get(normalized) || Promise.resolve();
@@ -73,38 +76,50 @@ function enqueueCommand(espMac, operation) {
 }
 
 function sendCommandToESP(espMac, payload, timeoutMs = 5000) {
-  return enqueueCommand(espMac, () => new Promise((resolve, reject) => {
+  return enqueueCommand(espMac, () => new Promise((resolve) => {
     const ws = getESPWebSocket(espMac);
     if (!ws || ws.readyState !== WebSocket.OPEN) {
-      return reject(new Error('ESP offline'));
+      return resolve({ status: 'error', error: 'ESP offline' });
     }
 
     const cleanupListeners = [];
+    let settled = false;
 
     const cleanup = () => {
       cleanupListeners.forEach((fn) => fn());
       cleanupListeners.length = 0;
     };
 
-    const timeout = setTimeout(() => {
+    const finishSuccess = (response) => {
+      if (settled) return;
+      settled = true;
       cleanup();
-      reject(new Error('ESP timeout'));
+      resolve(response);
+    };
+
+    const finishError = (message) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve({ status: 'error', error: message });
+    };
+
+    const timeout = setTimeout(() => {
+      finishError('ESP timeout');
     }, timeoutMs);
 
     cleanupListeners.push(() => clearTimeout(timeout));
 
     const onMessage = (data) => {
-      cleanup();
       try {
-        resolve(JSON.parse(data.toString()));
+        finishSuccess(JSON.parse(data.toString()));
       } catch (_e) {
-        reject(new Error('Invalid ESP response'));
+        finishError('Invalid ESP response');
       }
     };
 
     const onSocketClosed = () => {
-      cleanup();
-      reject(new Error('ESP offline'));
+      finishError('ESP offline');
     };
 
     ws.once('message', onMessage);
@@ -116,7 +131,11 @@ function sendCommandToESP(espMac, payload, timeoutMs = 5000) {
     cleanupListeners.push(() => ws.removeListener('error', onSocketClosed));
 
     logger.debug(`[WS TX][${espMac}] ${formatWsPayload(payload)}`);
-    ws.send(JSON.stringify(payload));
+    ws.send(JSON.stringify(payload), (error) => {
+      if (error) {
+        finishError('ESP offline');
+      }
+    });
   }));
 }
 
@@ -158,8 +177,9 @@ function initializeTunnel() {
           const payload = JSON.parse(data);
           if (payload?.action === 'get_config') {
             const clientConfig = getClientByMac(authenticatedMac);
+            const ledType = clientConfig?.ledType === 'sk6812' ? 'sk6812' : 'ws2812b';
 
-            if (!clientConfig || !Number.isInteger(clientConfig.ledCount) || !Number.isInteger(clientConfig.ledPin)) {
+            if (!clientConfig || !Number.isInteger(clientConfig.ledCount) || !Number.isInteger(clientConfig.ledPin) || !ledType) {
               const errorResponse = {
                 status: 'error',
                 action: 'config',
@@ -174,7 +194,8 @@ function initializeTunnel() {
               status: 'ok',
               action: 'config',
               ledCount: clientConfig.ledCount,
-              ledPin: clientConfig.ledPin
+              ledPin: clientConfig.ledPin,
+              ledType
             };
             logger.debug(`[WS TX][${authenticatedMac}] ${formatWsPayload(configResponse)}`);
             ws.send(JSON.stringify(configResponse));

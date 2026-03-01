@@ -5,16 +5,18 @@
       "nickname": "Mesa do escritório",
       "ledCount": 90,
       "ledPin": 13,
-      "updatedAt": "2026-02-28T22:57:02.511Z",
-      "createdAt": "2026-02-28T22:10:39.053Z"
+      "updatedAt": "2026-02-28T23:59:15.643Z",
+      "createdAt": "2026-02-28T22:10:39.053Z",
+      "ledType": "ws2812b"
     },
     {
       "espMac": "AC:67:B2:3B:D2:68",
       "nickname": "Sala",
-      "ledCount": 300,
+      "ledCount": 589,
       "ledPin": 13,
-      "updatedAt": "2026-02-28T22:19:26.317Z",
-      "createdAt": "2026-02-28T22:10:56.268Z"
+      "updatedAt": "2026-03-01T00:33:29.585Z",
+      "createdAt": "2026-02-28T22:10:56.268Z",
+      "ledType": "sk6812"
     }
   ]
 }

@@ -139,6 +139,19 @@ function parseRgb(body) {
   return { r, g, b };
 }
 
+function parseWhite(body) {
+  if (!Object.prototype.hasOwnProperty.call(body || {}, 'w')) {
+    return null;
+  }
+
+  const white = body?.w;
+  if (!Number.isInteger(white) || white < 0 || white > 255) {
+    throw new Error('W must be an integer between 0 and 255');
+  }
+
+  return white;
+}
+
 function parseEspTargets(body) {
   const raw = Array.isArray(body?.espMacs)
     ? body.espMacs
@@ -200,6 +213,11 @@ async function handleWOL(req, res) {
 
       try {
         const response = await sendCommandToESP(espMac, { action: 'wol', mac: targetMac });
+        if (response?.status === 'error') {
+          results.push({ espMac, ok: false, error: response.error || 'Falha na comunicação com ESP' });
+          continue;
+        }
+
         results.push({ espMac, ok: true, response });
       } catch (error) {
         results.push({ espMac, ok: false, error: error.message });
@@ -219,6 +237,7 @@ async function handleLED(req, res) {
     const targets = parseEspTargets(body);
 
     const color = parseRgb(body);
+    const white = parseWhite(body);
 
     const results = [];
 
@@ -230,7 +249,17 @@ async function handleLED(req, res) {
       }
 
       try {
-        const response = await sendCommandToESP(espMac, { action: 'led', r: color.r, g: color.g, b: color.b });
+        const command = { action: 'led', r: color.r, g: color.g, b: color.b };
+        if (client.ledType === 'sk6812' && white !== null) {
+          command.w = white;
+        }
+
+        const response = await sendCommandToESP(espMac, command);
+        if (response?.status === 'error') {
+          results.push({ espMac, ok: false, error: response.error || 'Falha na comunicação com ESP' });
+          continue;
+        }
+
         results.push({ espMac, ok: true, response });
       } catch (error) {
         results.push({ espMac, ok: false, error: error.message });

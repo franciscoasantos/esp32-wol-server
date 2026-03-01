@@ -1,6 +1,6 @@
 # ESP32 Wake-on-LAN Server
 
-Servidor WebSocket/HTTP para controle remoto de múltiplos ESP32 autenticados, com interface web protegida por login, suporte a Wake-on-LAN e controle de fita LED RGB.
+Servidor WebSocket/HTTP para controle remoto de múltiplos ESP32 autenticados, com interface web protegida por login, suporte a Wake-on-LAN e controle de fita LED RGB/RGBW.
 
 ## 📋 Descrição
 
@@ -17,12 +17,13 @@ Este sistema funciona como um servidor intermediário (tunnel) que:
 - **Autenticação JWT**: Login seguro com token válido por **7 dias**
 - **Túnel WebSocket**: Comunicação em tempo real com múltiplos ESP32
 - **Autenticação HMAC + MAC**: ESP envia `token`, `hmac` e `mac` no handshake
-- **Configuração remota do ESP**: ESP pode solicitar `ledCount` e `ledPin` via `get_config`
+- **Configuração remota do ESP**: ESP pode solicitar `ledCount`, `ledPin` e `ledType` via `get_config`
 - **Wake-on-LAN em lote**: Disparo para um ou vários ESPs selecionados
-- **Controle LED RGB**: Aplicação de cor única por fita (R/G/B)
+- **Controle LED RGB/RGBW**: Aplicação de cor única por fita (R/G/B) e canal branco opcional (`w`) para SK6812
 - **Descoberta de ESP não cadastrado**: Lista com MAC + IP na tela de configuração
 - **Cadastro dedicado de MAC WoL**: Página separada para gerenciar alvos WoL
 - **Logs de debug WS**: mensagens enviadas/recebidas no túnel para diagnóstico
+- **Resiliência de comunicação**: timeout/offline do ESP retorna erro por dispositivo sem derrubar o processo Node.js
 
 ## 📦 Pré-requisitos
 
@@ -104,7 +105,8 @@ Resposta de sucesso:
   "status": "ok",
   "action": "config",
   "ledCount": 300,
-  "ledPin": 13
+  "ledPin": 13,
+  "ledType": "sk6812"
 }
 ```
 
@@ -138,6 +140,17 @@ Resposta de erro:
 }
 ```
 
+**LED RGBW (apenas para ESP com `ledType = sk6812`)**
+```json
+{
+  "action": "led",
+  "r": 255,
+  "g": 140,
+  "b": 55,
+  "w": 80
+}
+```
+
 ### 4) Resposta do ESP
 
 Exemplo esperado:
@@ -164,7 +177,8 @@ Exemplo esperado:
 - **WOL e LED**: seleção de dispositivos via modal (um ou vários)
 - **WOL**: seleciona alvo WoL a partir de cadastro dedicado (`/wol-targets`)
 - **LED**: seletor de cor aplica automaticamente ao clicar/arrastar no picker
-- **Configuração ESP**: cadastro por MAC do ESP, apelido, `ledCount` e `ledPin`
+- **LED (RGBW)**: quando houver ESP SK6812 selecionado, aparece slider de branco acima de "Tons"
+- **Configuração ESP**: cadastro por MAC do ESP, apelido, `ledCount`, `ledPin` e `ledType` (`ws2812b`/`sk6812`)
 
 ## 🔗 API Endpoints
 
@@ -205,9 +219,15 @@ Exemplo esperado:
   "espMacs": ["7C:87:CE:28:09:68"],
   "r": 0,
   "g": 204,
-  "b": 0
+  "b": 0,
+  "w": 64
 }
 ```
+
+Observações para `POST /led`:
+- `w` é opcional e deve estar entre `0` e `255`
+- o servidor só envia `w` para ESPs cadastrados com `ledType: "sk6812"`
+- ESPs `ws2812b` recebem apenas `r`, `g` e `b`
 
 **Response de ações (resumo por dispositivo)**
 ```json
@@ -271,6 +291,11 @@ esp32-wol-server/
 - Confirme que não há firewall bloqueando a porta
 - Verifique os logs do servidor - pode estar rejeitando por HMAC inválido
 - Teste a conexão WebSocket manualmente com ferramentas como `wscat`
+
+### Timeout no comando para ESP
+- `ESP timeout` agora é tratado como falha de comunicação por dispositivo
+- a API retorna `ok: false` no item correspondente de `results`
+- o servidor continua executando normalmente (sem encerrar o processo)
 
 ### ESP não consegue se autenticar
 - Confirme que `HMAC_SECRET` é igual no servidor (.env) e no ESP32

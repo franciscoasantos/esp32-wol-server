@@ -21,6 +21,11 @@ h1 { margin: 0; font-size: 26px; }
 #ringSelector { width: 14px; height: 14px; margin-left: -7px; margin-top: -7px; }
 #svSelector { width: 12px; height: 12px; margin-left: -6px; margin-top: -6px; }
 .current-color { text-align: center; margin-bottom: 14px; font-weight: 600; opacity: 0.9; }
+.white-section { margin-bottom: 16px; }
+.white-title { font-size: 14px; margin-bottom: 8px; opacity: 0.9; }
+.white-controls { display: flex; align-items: center; gap: 12px; }
+.white-controls input[type="range"] { flex: 1; }
+.white-value { min-width: 56px; text-align: right; font-size: 13px; opacity: 0.9; }
 .tone-section { margin-bottom: 16px; }
 .tone-title, .favorites-title { font-size: 14px; margin-bottom: 10px; opacity: 0.9; }
 .swatch-row { display: grid; grid-template-columns: repeat(10, 1fr); gap: 8px; margin-bottom: 4px; }
@@ -83,6 +88,14 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 
       <div class="current-color" id="currentColor">Cor atual: #FF8C37</div>
 
+      <div class="white-section" id="whiteSection" style="display:none;">
+        <div class="white-title">Intensidade do branco (RGBW)</div>
+        <div class="white-controls">
+          <input id="whiteSlider" type="range" min="0" max="255" step="1" value="0" />
+          <span class="white-value" id="whiteValue">0</span>
+        </div>
+      </div>
+
       <div class="tone-section">
         <div class="tone-title">Tons</div>
         <div class="swatch-row" id="tonesRow"></div>
@@ -138,6 +151,9 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
     const tonesRow = document.getElementById('tonesRow');
     const favoritesRow = document.getElementById('favoritesRow');
     const currentColor = document.getElementById('currentColor');
+    const whiteSection = document.getElementById('whiteSection');
+    const whiteSlider = document.getElementById('whiteSlider');
+    const whiteValue = document.getElementById('whiteValue');
     const status = document.getElementById('status');
 
     const RING_THICKNESS_RATIO = 0.0625;
@@ -165,21 +181,41 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
     let sendTimer = null;
     let pendingSend = false;
     let sending = false;
+    let whiteIntensity = 0;
 
     function selectedClients() {
       return clients.filter((client) => selectedEspMacs.has(client.espMac));
+    }
+
+    function supportsRgbw(client) {
+      return client?.ledType === 'sk6812';
+    }
+
+    function hasSelectedRgbwClient() {
+      return selectedClients().some((client) => supportsRgbw(client));
+    }
+
+    function updateWhiteSectionVisibility() {
+      const visible = hasSelectedRgbwClient();
+      whiteSection.style.display = visible ? 'block' : 'none';
+    }
+
+    function updateWhiteValueLabel() {
+      whiteValue.textContent = String(whiteIntensity);
     }
 
     function updateClientMeta() {
       const selected = selectedClients();
       if (!selected.length) {
         clientMeta.textContent = 'Nenhum dispositivo selecionado.';
+        updateWhiteSectionVisibility();
         return;
       }
 
       const onlineCount = selected.filter((client) => connectedClients.has(client.espMac)).length;
       const names = selected.map((client) => client.nickname).join(', ');
       clientMeta.textContent = `Selecionados (${selected.length}): ${names} • Online: ${onlineCount}/${selected.length}`;
+      updateWhiteSectionVisibility();
     }
 
     function renderDeviceList() {
@@ -191,12 +227,13 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
       deviceList.innerHTML = clients.map((client) => {
         const checked = tempSelectedEspMacs.has(client.espMac) ? 'checked' : '';
         const online = connectedClients.has(client.espMac) ? 'online' : 'offline';
+        const ledTypeLabel = client.ledType === 'sk6812' ? 'SK6812 (RGBW)' : 'WS2812B (RGB)';
         return `
           <label class="device-item">
             <input type="checkbox" value="${client.espMac}" ${checked} />
             <div>
               <div>${client.nickname} (${client.espMac})</div>
-              <div class="meta">ESP ${online} • LEDs: ${client.ledCount}</div>
+              <div class="meta">ESP ${online} • LEDs: ${client.ledCount} • ${ledTypeLabel}</div>
             </div>
           </label>
         `;
@@ -244,6 +281,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
       selectedEspMacs = next;
       updateClientMeta();
       closeDeviceModal();
+      scheduleApplyColor();
     }
 
     function selectOnlineInModal() {
@@ -257,6 +295,12 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
       tempSelectedEspMacs = new Set();
       renderDeviceList();
     }
+
+    whiteSlider.addEventListener('input', () => {
+      whiteIntensity = Number.parseInt(whiteSlider.value, 10);
+      updateWhiteValueLabel();
+      scheduleApplyColor();
+    });
 
     eventSource.addEventListener('status', (event) => {
       const data = JSON.parse(event.data);
@@ -577,6 +621,9 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
       try {
         const rgb = hsvToRgb(hue, saturation, value);
         const payload = { espMacs: onlineTargets, r: rgb.r, g: rgb.g, b: rgb.b };
+        if (hasSelectedRgbwClient()) {
+          payload.w = whiteIntensity;
+        }
 
         const response = await fetch('/led', {
           method: 'POST',
@@ -607,6 +654,8 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 
     updatePickerGeometry();
     renderHueRing();
+    updateWhiteValueLabel();
+    updateWhiteSectionVisibility();
     renderAll();
     loadClients();
   </script>

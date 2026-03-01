@@ -10,6 +10,15 @@ function normalizeMac(value) {
   return cleaned;
 }
 
+function normalizeLedType(value) {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'ws2812b' || normalized === 'sk6812') {
+    return normalized;
+  }
+  return null;
+}
+
 function createDefaultStore() {
   return {
     clients: []
@@ -78,12 +87,18 @@ function upsertClient(payload) {
     throw new Error('ledPin deve ser um inteiro entre 0 e 48');
   }
 
+  const ledType = normalizeLedType(payload?.ledType);
+  if (!ledType) {
+    throw new Error('ledType deve ser ws2812b ou sk6812');
+  }
+
   const store = loadStore();
   const nextClient = {
     espMac,
     nickname,
     ledCount,
     ledPin,
+    ledType,
     updatedAt: new Date().toISOString()
   };
 

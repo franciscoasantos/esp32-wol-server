@@ -12,6 +12,7 @@ body { margin: 0; background: linear-gradient(135deg, #0f172a, #020617); color: 
 h1 { margin: 0 0 8px; font-size: 26px; }
 .subtitle { opacity: 0.7; margin-bottom: 20px; font-size: 14px; }
 .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.led-config-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .field { margin-bottom: 12px; }
 label { display: block; font-size: 12px; opacity: 0.8; margin-bottom: 6px; text-transform: uppercase; letter-spacing: .4px; }
 input, select { width: 100%; padding: 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.2); background: rgba(255,255,255,0.08); color: white; }
@@ -30,7 +31,10 @@ button { width: 100%; padding: 14px; border: none; border-radius: 10px; font-siz
 .discovered-row select { flex: 1; }
 .links { margin-top: 14px; text-align: center; display: flex; justify-content: center; gap: 14px; }
 .links a { color: rgba(255,255,255,.75); text-decoration: none; font-size: 14px; }
-@media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
+@media (max-width: 760px) {
+  .grid { grid-template-columns: 1fr; }
+  .led-config-grid { grid-template-columns: 1fr; }
+}
 </style>
 </head>
 <body>
@@ -61,14 +65,24 @@ button { width: 100%; padding: 14px; border: none; border-radius: 10px; font-siz
           </div>
         </div>
 
-        <div class="field">
-          <label for="ledCount">Quantidade de LEDs</label>
-          <input id="ledCount" type="number" min="1" max="2048" value="30" required />
-        </div>
+        <div class="led-config-grid">
+          <div class="field">
+            <label for="ledCount">Quantidade de LEDs</label>
+            <input id="ledCount" type="number" min="1" max="2048" value="30" required />
+          </div>
 
-        <div class="field">
-          <label for="ledPin">Pino do ESP32 para LED</label>
-          <input id="ledPin" type="number" min="0" max="48" value="2" required />
+          <div class="field">
+            <label for="ledPin">Pino do ESP32 para LED</label>
+            <input id="ledPin" type="number" min="0" max="48" value="2" required />
+          </div>
+
+          <div class="field">
+            <label for="ledType">Tipo de fita</label>
+            <select id="ledType" required>
+              <option value="ws2812b">WS2812B (RGB)</option>
+              <option value="sk6812">SK6812 (RGBW)</option>
+            </select>
+          </div>
         </div>
 
         <div id="status" class="status info">
@@ -97,6 +111,7 @@ button { width: 100%; padding: 14px; border: none; border-radius: 10px; font-siz
   const nicknameInput = document.getElementById('nickname');
   const ledCountInput = document.getElementById('ledCount');
   const ledPinInput = document.getElementById('ledPin');
+  const ledTypeInput = document.getElementById('ledType');
   const discoveredSelect = document.getElementById('discoveredSelect');
 
   let clients = [];
@@ -112,6 +127,7 @@ button { width: 100%; padding: 14px; border: none; border-radius: 10px; font-siz
     nicknameInput.value = client.nickname || '';
     ledCountInput.value = client.ledCount || 30;
     ledPinInput.value = Number.isInteger(client.ledPin) ? client.ledPin : 2;
+    ledTypeInput.value = client.ledType === 'sk6812' ? 'sk6812' : 'ws2812b';
   }
 
   function renderClientsList() {
@@ -123,9 +139,10 @@ button { width: 100%; padding: 14px; border: none; border-radius: 10px; font-siz
     clientsList.innerHTML = clients
       .map((client) => {
         const online = client.connected ? 'online' : 'offline';
+        const ledTypeLabel = client.ledType === 'sk6812' ? 'SK6812 (RGBW)' : 'WS2812B (RGB)';
         return `
           <div class="client-item">
-            <span>${client.nickname} (${client.espMac}) • LEDs ${client.ledCount} • PIN ${Number.isInteger(client.ledPin) ? client.ledPin : '-'} • ${online}</span>
+            <span>${client.nickname} (${client.espMac}) • LEDs ${client.ledCount} • PIN ${Number.isInteger(client.ledPin) ? client.ledPin : '-'} • ${ledTypeLabel} • ${online}</span>
             <button type="button" onclick="selectClient('${client.espMac}')">Editar</button>
           </div>
         `;
@@ -181,7 +198,8 @@ button { width: 100%; padding: 14px; border: none; border-radius: 10px; font-siz
       espMac: espMacInput.value.trim(),
       nickname: nicknameInput.value.trim(),
       ledCount: Number.parseInt(ledCountInput.value, 10),
-      ledPin: Number.parseInt(ledPinInput.value, 10)
+      ledPin: Number.parseInt(ledPinInput.value, 10),
+      ledType: ledTypeInput.value
     };
 
     setStatus('info', 'Salvando cliente...');
