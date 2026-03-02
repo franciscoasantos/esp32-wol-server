@@ -246,6 +246,9 @@ async function handleLED(req, res) {
           command.w = white;
         }
 
+        // Salva a última cor do LED
+        upsertClient({ ...client, lastLedColor: { r: color.r, g: color.g, b: color.b } });
+
         const response = await sendCommandToESP(espMac, command);
         if (response?.status === 'error') {
           return { espMac, ok: false, error: response.error || 'Falha na comunicação com ESP' };

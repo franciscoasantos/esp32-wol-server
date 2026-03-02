@@ -201,7 +201,8 @@ function initializeTunnel() {
               action: 'config',
               ledCount: clientConfig.ledCount,
               ledPin: clientConfig.ledPin,
-              ledType
+              ledType,
+              ...(clientConfig.lastLedColor ? { lastLedColor: clientConfig.lastLedColor } : {})
             };
             logger.debug(`[WS TX][${authenticatedMac}] ${formatWsPayload(configResponse)}`);
             ws.send(JSON.stringify(configResponse));

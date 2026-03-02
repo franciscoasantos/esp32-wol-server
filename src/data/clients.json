@@ -5,9 +5,14 @@
       "nickname": "Mesa do escritório",
       "ledCount": 90,
       "ledPin": 13,
-      "updatedAt": "2026-02-28T23:59:15.643Z",
+      "updatedAt": "2026-03-02T03:17:12.465Z",
       "createdAt": "2026-02-28T22:10:39.053Z",
-      "ledType": "ws2812b"
+      "ledType": "ws2812b",
+      "lastLedColor": {
+        "r": 255,
+        "g": 77,
+        "b": 148
+      }
     },
     {
       "espMac": "AC:67:B2:3B:D2:68",
@@ -16,7 +21,12 @@
       "ledPin": 13,
       "updatedAt": "2026-03-01T00:33:29.585Z",
       "createdAt": "2026-02-28T22:10:56.268Z",
-      "ledType": "sk6812"
+      "ledType": "sk6812",
+      "lastLedColor": {
+        "r": 255,
+        "g": 255,
+        "b": 255
+      }
     }
   ]
 }

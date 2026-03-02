@@ -93,13 +93,26 @@ function upsertClient(payload) {
   }
 
   const store = loadStore();
+  // Permite cor no formato { r: 0-255, g: 0-255, b: 0-255 }
+  let lastLedColor = undefined;
+  if (payload?.lastLedColor && typeof payload.lastLedColor === 'object') {
+    const { r, g, b } = payload.lastLedColor;
+    if (
+      Number.isInteger(r) && r >= 0 && r <= 255 &&
+      Number.isInteger(g) && g >= 0 && g <= 255 &&
+      Number.isInteger(b) && b >= 0 && b <= 255
+    ) {
+      lastLedColor = { r, g, b };
+    }
+  }
   const nextClient = {
     espMac,
     nickname,
     ledCount,
     ledPin,
     ledType,
-    updatedAt: new Date().toISOString()
+    updatedAt: new Date().toISOString(),
+    ...(lastLedColor ? { lastLedColor } : {})
   };
 
   const idx = store.clients.findIndex((item) => item.espMac === espMac);
