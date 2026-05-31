@@ -1,4 +1,4 @@
-const { controlPage, ledPage, configPage, wolTargetsPage } = require('../views');
+const { appShell } = require('../views');
 const {
   normalizeMac,
   getClients,
@@ -6,13 +6,31 @@ const {
   upsertClient
 } = require('../data/clientsStore');
 const { getWolTargets, upsertWolTarget } = require('../data/wolTargetsStore');
+const { getScenes, saveScene, deleteScene } = require('../data/scenesStore');
 const {
   isESPConnected,
   sendCommandToESP,
   getConnectedClients,
   getConnectedClientDetails
 } = require('../websocket/espTunnel');
-const { addClient, removeClient } = require('../utils/sse');
+const { addClient, removeClient, notifyClientState, notifyClientEffect } = require('../utils/sse');
+
+// Efeito ativo por dispositivo (em memória). O ESP roda o efeito no firmware e
+// não reporta estado de volta, então o servidor é a fonte da verdade aqui.
+const activeEffects = new Map(); // espMac -> effect ('breathing' | 'rainbow' | 'fade')
+
+function setActiveEffect(espMac, effect) {
+  if (!effect || effect === 'none') {
+    activeEffects.delete(espMac);
+  } else {
+    activeEffects.set(espMac, effect);
+  }
+  notifyClientEffect(espMac, effect && effect !== 'none' ? effect : null);
+}
+
+function getActiveEffect(espMac) {
+  return activeEffects.get(espMac) || null;
+}
 
 function sendJson(res, status, payload) {
   res.writeHead(status, { 'Content-Type': 'application/json' });
@@ -46,28 +64,16 @@ function getClientsWithStatus() {
   const connected = new Set(getConnectedClients());
   return getClients().map((client) => ({
     ...client,
-    connected: connected.has(client.espMac)
+    connected: connected.has(client.espMac),
+    activeEffect: getActiveEffect(client.espMac)
   }));
 }
 
-function handleHome(req, res) {
+// Todas as rotas de página servem o mesmo shell SPA; o roteador no cliente
+// renderiza a view correta a partir do pathname.
+function handleAppShell(req, res) {
   res.writeHead(200, { 'Content-Type': 'text/html; charset=UTF-8' });
-  res.end(controlPage);
-}
-
-function handleLEDPage(req, res) {
-  res.writeHead(200, { 'Content-Type': 'text/html; charset=UTF-8' });
-  res.end(ledPage);
-}
-
-function handleConfigPage(req, res) {
-  res.writeHead(200, { 'Content-Type': 'text/html; charset=UTF-8' });
-  res.end(configPage);
-}
-
-function handleWolTargetsPage(req, res) {
-  res.writeHead(200, { 'Content-Type': 'text/html; charset=UTF-8' });
-  res.end(wolTargetsPage);
+  res.end(appShell);
 }
 
 function handleStatus(req, res) {
@@ -226,6 +232,30 @@ async function handleWOL(req, res) {
   }
 }
 
+function handleGetScenes(_req, res) {
+  return sendJson(res, 200, { scenes: getScenes() });
+}
+
+async function handleSaveScene(req, res) {
+  try {
+    const body = await parseJsonBody(req);
+    const scene = saveScene(body);
+    return sendJson(res, 200, { scene });
+  } catch (error) {
+    const status = error.message === 'Invalid JSON' ? 400 : 422;
+    return sendJson(res, status, { error: error.message });
+  }
+}
+
+function handleDeleteScene(req, res, id) {
+  try {
+    deleteScene(id);
+    return sendJson(res, 200, { ok: true });
+  } catch (error) {
+    return sendJson(res, 404, { error: error.message });
+  }
+}
+
 async function handleLED(req, res) {
   try {
     const body = await parseJsonBody(req);
@@ -246,13 +276,21 @@ async function handleLED(req, res) {
           command.w = white;
         }
 
-        // Salva a última cor do LED
-        upsertClient({ ...client, lastLedColor: { r: color.r, g: color.g, b: color.b } });
-
         const response = await sendCommandToESP(espMac, command);
         if (response?.status === 'error') {
           return { espMac, ok: false, error: response.error || 'Falha na comunicação com ESP' };
         }
+
+        // Usa valores confirmados pelo ESP no ACK (ou fallback para os do request)
+        const confirmedColor = {
+          r: typeof response?.r === 'number' ? response.r : color.r,
+          g: typeof response?.g === 'number' ? response.g : color.g,
+          b: typeof response?.b === 'number' ? response.b : color.b
+        };
+        upsertClient({ ...client, lastLedColor: confirmedColor });
+        // Cor sólida interrompe qualquer efeito ativo (espelha o firmware)
+        setActiveEffect(espMac, 'none');
+        notifyClientState(espMac, { ...confirmedColor, w: response?.w || 0 });
 
         return { espMac, ok: true, response };
       } catch (error) {
@@ -267,11 +305,57 @@ async function handleLED(req, res) {
   }
 }
 
+const ALLOWED_EFFECTS = new Set(['breathing', 'rainbow', 'fade', 'none']);
+
+// Envia UM único comando de efeito ao ESP. A animação roda no firmware;
+// o servidor não fica mandando frames. effect 'none' interrompe o efeito.
+async function handleEffect(req, res) {
+  try {
+    const body = await parseJsonBody(req);
+    const targets = parseEspTargets(body);
+
+    const effect = typeof body?.effect === 'string' ? body.effect.trim().toLowerCase() : '';
+    if (!ALLOWED_EFFECTS.has(effect)) {
+      return sendJson(res, 422, { error: 'effect inválido' });
+    }
+
+    // Cor base opcional (usada por efeitos como breathing/fade)
+    let color = null;
+    if (['r', 'g', 'b'].every((k) => Object.prototype.hasOwnProperty.call(body || {}, k))) {
+      color = parseRgb(body);
+    }
+
+    const results = await Promise.all(targets.map(async (espMac) => {
+      const client = getClientByMac(espMac);
+      if (!client) {
+        return { espMac, ok: false, error: 'Cliente não encontrado' };
+      }
+
+      try {
+        const command = { action: 'effect', effect };
+        if (color) { command.r = color.r; command.g = color.g; command.b = color.b; }
+
+        const response = await sendCommandToESP(espMac, command);
+        if (response?.status === 'error') {
+          return { espMac, ok: false, error: response.error || 'Falha na comunicação com ESP' };
+        }
+        // Registra o efeito ativo (ou limpa se 'none') e propaga via SSE
+        setActiveEffect(espMac, effect);
+        return { espMac, ok: true, response };
+      } catch (error) {
+        return { espMac, ok: false, error: error.message };
+      }
+    }));
+
+    return sendJson(res, 200, buildResultSummary('effect', results));
+  } catch (error) {
+    const status = error.message === 'Invalid JSON' ? 400 : 422;
+    return sendJson(res, status, { error: error.message });
+  }
+}
+
 module.exports = {
-  handleHome,
-  handleLEDPage,
-  handleConfigPage,
-  handleWolTargetsPage,
+  handleAppShell,
   handleStatus,
   handleGetClients,
   handleGetDiscoveredClients,
@@ -279,5 +363,9 @@ module.exports = {
   handleUpsertWolTarget,
   handleUpsertClient,
   handleWOL,
-  handleLED
+  handleLED,
+  handleEffect,
+  handleGetScenes,
+  handleSaveScene,
+  handleDeleteScene
 };

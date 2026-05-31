@@ -2,75 +2,67 @@ const WebSocket = require('ws');
 const logger = require('../utils/logger');
 const { validateHMAC, validateTimestamp } = require('../auth/hmac');
 const { TUNNEL_PORT } = require('../config');
-const { normalizeMac } = require('../data/clientsStore');
-const { getClientByMac } = require('../data/clientsStore');
+const { normalizeMac, getClientByMac } = require('../data/clientsStore');
 
-const clients = new Map();
-const clientDetails = new Map();
+const clients = new Map();          // espMac → ws
+const clientDetails = new Map();    // espMac → { ip }
+const pendingResolvers = new Map(); // espMac → (response) => void
 const statusChangeCallbacks = [];
+const stateChangeCallbacks = [];
 const commandQueues = new Map();
 let tunnelServer = null;
 
 function formatWsPayload(payload) {
   if (typeof payload === 'string') return payload;
-  try {
-    return JSON.stringify(payload);
-  } catch (_e) {
-    return String(payload);
-  }
+  try { return JSON.stringify(payload); } catch (_e) { return String(payload); }
 }
 
-function getConnectedClients() {
-  return Array.from(clients.keys());
-}
+function getConnectedClients() { return Array.from(clients.keys()); }
 
 function getConnectedClientDetails() {
-  return Array.from(clientDetails.entries()).map(([espMac, details]) => ({
-    espMac,
-    ip: details.ip
-  }));
+  return Array.from(clientDetails.entries()).map(([espMac, d]) => ({ espMac, ip: d.ip }));
 }
 
-function onStatusChange(callback) {
-  statusChangeCallbacks.push(callback);
-}
+function onStatusChange(cb) { statusChangeCallbacks.push(cb); }
+function onStateChange(cb) { stateChangeCallbacks.push(cb); }
 
 function notifyStatusChange() {
-  const connectedClients = getConnectedClients();
-  statusChangeCallbacks.forEach((callback) => callback(connectedClients));
+  const connected = getConnectedClients();
+  statusChangeCallbacks.forEach((cb) => cb(connected));
+}
+
+function notifyStateChange(espMac, color) {
+  stateChangeCallbacks.forEach((cb) => cb(espMac, color));
 }
 
 function isESPConnected(espMac) {
-  if (!espMac) {
-    return clients.size > 0;
-  }
-
+  if (!espMac) return clients.size > 0;
   const normalized = normalizeMac(espMac);
   return normalized ? clients.has(normalized) : false;
 }
 
 function getESPWebSocket(espMac) {
   const normalized = normalizeMac(espMac);
-  if (!normalized) return null;
-  return clients.get(normalized) || null;
+  return normalized ? (clients.get(normalized) || null) : null;
+}
+
+function resolveAndClear(espMac, response) {
+  const resolve = pendingResolvers.get(espMac);
+  if (resolve) {
+    pendingResolvers.delete(espMac);
+    resolve(response);
+  }
 }
 
 function enqueueCommand(espMac, operation) {
   const normalized = normalizeMac(espMac);
-  if (!normalized) {
-    return Promise.resolve({
-      status: 'error',
-      error: 'MAC inválido'
-    });
-  }
+  if (!normalized) return Promise.resolve({ status: 'error', error: 'MAC inválido' });
 
   const previous = commandQueues.get(normalized) || Promise.resolve();
   const next = previous.catch(() => undefined).then(operation);
 
   commandQueues.set(normalized, next.finally(() => {
-    if (commandQueues.get(normalized) === next) {
-      commandQueues.delete(normalized);
-    }
+    if (commandQueues.get(normalized) === next) commandQueues.delete(normalized);
   }));
 
   return next;
@@ -78,66 +70,68 @@ function enqueueCommand(espMac, operation) {
 
 function sendCommandToESP(espMac, payload, timeoutMs = 5000) {
   return enqueueCommand(espMac, () => new Promise((resolve) => {
-    const ws = getESPWebSocket(espMac);
+    const normalized = normalizeMac(espMac);
+    const ws = normalized ? clients.get(normalized) : null;
+
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       return resolve({ status: 'error', error: 'ESP offline' });
     }
 
-    const cleanupListeners = [];
-    let settled = false;
-
-    const cleanup = () => {
-      cleanupListeners.forEach((fn) => fn());
-      cleanupListeners.length = 0;
-    };
-
-    const finishSuccess = (response) => {
-      if (settled) return;
-      settled = true;
-      cleanup();
+    const resolver = (response) => {
+      clearTimeout(timeout);
       resolve(response);
     };
 
-    const finishError = (message) => {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      resolve({ status: 'error', error: message });
-    };
-
     const timeout = setTimeout(() => {
-      finishError('ESP timeout');
+      if (pendingResolvers.get(normalized) === resolver) {
+        pendingResolvers.delete(normalized);
+        resolve({ status: 'error', error: 'ESP timeout' });
+      }
     }, timeoutMs);
 
-    cleanupListeners.push(() => clearTimeout(timeout));
-
-    const onMessage = (data) => {
-      try {
-        finishSuccess(JSON.parse(data.toString()));
-      } catch (_e) {
-        finishError('Invalid ESP response');
-      }
-    };
-
-    const onSocketClosed = () => {
-      finishError('ESP offline');
-    };
-
-    ws.once('message', onMessage);
-    ws.once('close', onSocketClosed);
-    ws.once('error', onSocketClosed);
-
-    cleanupListeners.push(() => ws.removeListener('message', onMessage));
-    cleanupListeners.push(() => ws.removeListener('close', onSocketClosed));
-    cleanupListeners.push(() => ws.removeListener('error', onSocketClosed));
+    pendingResolvers.set(normalized, resolver);
 
     logger.debug(`[WS TX][${espMac}] ${formatWsPayload(payload)}`);
     ws.send(JSON.stringify(payload), (error) => {
       if (error) {
-        finishError('ESP offline');
+        if (pendingResolvers.get(normalized) === resolver) {
+          pendingResolvers.delete(normalized);
+          clearTimeout(timeout);
+          resolve({ status: 'error', error: 'ESP offline' });
+        }
       }
     });
   }));
+}
+
+function handleGetConfig(ws, espMac) {
+  const clientConfig = getClientByMac(espMac);
+  const ledType = clientConfig?.ledType === 'sk6812' ? 'sk6812' : 'ws2812b';
+
+  if (!clientConfig || !Number.isInteger(clientConfig.ledCount) || !Number.isInteger(clientConfig.ledPin) || !ledType) {
+    const errRes = { status: 'error', action: 'config', error: 'config_incomplete' };
+    logger.debug(`[WS TX][${espMac}] ${formatWsPayload(errRes)}`);
+    ws.send(JSON.stringify(errRes));
+    return;
+  }
+
+  const configRes = {
+    status: 'ok',
+    action: 'config',
+    ledCount: clientConfig.ledCount,
+    ledPin: clientConfig.ledPin,
+    ledType,
+    ...(clientConfig.lastLedColor ? { lastLedColor: clientConfig.lastLedColor } : {})
+  };
+  logger.debug(`[WS TX][${espMac}] ${formatWsPayload(configRes)}`);
+  ws.send(JSON.stringify(configRes));
+}
+
+function handleStateReport(espMac, payload) {
+  const r = payload?.r, g = payload?.g, b = payload?.b, w = payload?.w;
+  if (typeof r !== 'number' || typeof g !== 'number' || typeof b !== 'number') return;
+  logger.debug(`[STATE][${espMac}] r=${r} g=${g} b=${b} w=${w || 0}`);
+  notifyStateChange(espMac, { r, g, b, w: w || 0 });
 }
 
 function normalizeIp(value) {
@@ -147,9 +141,7 @@ function normalizeIp(value) {
 }
 
 function initializeTunnel() {
-  if (tunnelServer) {
-    return tunnelServer;
-  }
+  if (tunnelServer) return tunnelServer;
 
   const wss = new WebSocket.Server({ port: TUNNEL_PORT });
   tunnelServer = wss;
@@ -169,134 +161,86 @@ function initializeTunnel() {
     }, 10000);
 
     ws.isAlive = true;
-    ws.on('pong', () => {
-      ws.isAlive = true;
-    });
+    ws.on('pong', () => { ws.isAlive = true; });
 
     ws.on('message', (message) => {
       const data = message.toString();
 
-      if (authenticated) {
-        logger.debug(`[WS RX][${authenticatedMac}] ${data}`);
-
+      if (!authenticated) {
+        logger.debug(`[WS RX][UNAUTH] ${data}`);
         try {
-          const payload = JSON.parse(data);
-          if (payload?.action === 'get_config') {
-            const clientConfig = getClientByMac(authenticatedMac);
-            const ledType = clientConfig?.ledType === 'sk6812' ? 'sk6812' : 'ws2812b';
+          const auth = JSON.parse(data);
+          const { token, hmac, mac } = auth;
+          const normalizedMac = normalizeMac(mac);
 
-            if (!clientConfig || !Number.isInteger(clientConfig.ledCount) || !Number.isInteger(clientConfig.ledPin) || !ledType) {
-              const errorResponse = {
-                status: 'error',
-                action: 'config',
-                error: 'config_incomplete'
-              };
-              logger.debug(`[WS TX][${authenticatedMac}] ${formatWsPayload(errorResponse)}`);
-              ws.send(JSON.stringify(errorResponse));
-              return;
+          if (!token || !hmac || !normalizedMac) { logger.error('Missing/invalid token, hmac or mac'); ws.close(); return; }
+          if (!validateTimestamp(token)) { logger.error('Invalid or expired timestamp'); ws.close(); return; }
+          if (!validateHMAC(token, hmac)) { logger.error('Invalid HMAC'); ws.close(); return; }
+
+          logger.info(`ESP authenticated successfully: ${normalizedMac}`);
+          authenticated = true;
+          authenticatedMac = normalizedMac;
+          clearTimeout(authTimeout);
+
+          const previousWs = clients.get(normalizedMac);
+          if (previousWs && previousWs !== ws) previousWs.close();
+
+          clients.set(normalizedMac, ws);
+          clientDetails.set(normalizedMac, { ip: normalizeIp(request?.socket?.remoteAddress) });
+          notifyStatusChange();
+
+          pingInterval = setInterval(() => {
+            if (!ws.isAlive) {
+              logger.warn(`ESP not responding to ping, terminating: ${normalizedMac}`);
+              return ws.terminate();
             }
-
-            const configResponse = {
-              status: 'ok',
-              action: 'config',
-              ledCount: clientConfig.ledCount,
-              ledPin: clientConfig.ledPin,
-              ledType,
-              ...(clientConfig.lastLedColor ? { lastLedColor: clientConfig.lastLedColor } : {})
-            };
-            logger.debug(`[WS TX][${authenticatedMac}] ${formatWsPayload(configResponse)}`);
-            ws.send(JSON.stringify(configResponse));
-            return;
-          }
-        } catch (_e) {
-          logger.warn(`Mensagem autenticada inválida de ${authenticatedMac}`);
+            ws.isAlive = false;
+            ws.ping();
+          }, 10000);
+        } catch (e) {
+          logger.error('Invalid auth JSON:', data, e.message);
+          ws.close();
         }
-
         return;
       }
 
-      logger.debug(`[WS RX][UNAUTH] ${data}`);
+      // Authenticated message dispatch
+      logger.debug(`[WS RX][${authenticatedMac}] ${data}`);
 
-      try {
-        const auth = JSON.parse(data);
-        const { token, hmac, mac } = auth;
-        const normalizedMac = normalizeMac(mac);
+      let payload;
+      try { payload = JSON.parse(data); } catch (_e) { logger.warn(`Invalid JSON from ${authenticatedMac}`); return; }
 
-        logger.debug(`Auth attempt: token="${token}"`);
+      const action = payload?.action;
 
-        if (!token || !hmac || !normalizedMac) {
-          logger.error('Missing/invalid token, hmac or mac');
-          ws.close();
-          return;
-        }
-
-        if (!validateTimestamp(token)) {
-          logger.error('Invalid or expired timestamp');
-          ws.close();
-          return;
-        }
-
-        if (!validateHMAC(token, hmac)) {
-          logger.error('Invalid HMAC');
-          ws.close();
-          return;
-        }
-
-        logger.info(`ESP authenticated successfully: ${normalizedMac}`);
-        authenticated = true;
-        authenticatedMac = normalizedMac;
-        clearTimeout(authTimeout);
-
-        const previousWs = clients.get(normalizedMac);
-        if (previousWs && previousWs !== ws) {
-          previousWs.close();
-        }
-
-        clients.set(normalizedMac, ws);
-        clientDetails.set(normalizedMac, {
-          ip: normalizeIp(request?.socket?.remoteAddress)
-        });
-        notifyStatusChange();
-
-        pingInterval = setInterval(() => {
-          if (!ws.isAlive) {
-            logger.warn(`ESP not responding to ping, terminating connection: ${normalizedMac}`);
-            return ws.terminate();
-          }
-
-          ws.isAlive = false;
-          ws.ping();
-        }, 10000);
-      } catch (e) {
-        logger.error('Invalid auth JSON:', data);
-        logger.error('Error:', e.message);
-        ws.close();
+      if (action === 'get_config') {
+        handleGetConfig(ws, authenticatedMac);
+        return;
       }
+
+      if (action === 'state_report') {
+        handleStateReport(authenticatedMac, payload);
+        return;
+      }
+
+      // Route to pending command resolver (LED, WoL, etc. responses)
+      resolveAndClear(authenticatedMac, payload);
     });
 
-    ws.on('close', () => {
-      logger.info('ESP disconnected');
+    const onDisconnect = () => {
       clearTimeout(authTimeout);
       if (pingInterval) clearInterval(pingInterval);
-
-      if (authenticatedMac && clients.get(authenticatedMac) === ws) {
-        clients.delete(authenticatedMac);
-        clientDetails.delete(authenticatedMac);
-        notifyStatusChange();
+      if (authenticatedMac) {
+        resolveAndClear(authenticatedMac, { status: 'error', error: 'ESP offline' });
+        if (clients.get(authenticatedMac) === ws) {
+          clients.delete(authenticatedMac);
+          clientDetails.delete(authenticatedMac);
+          notifyStatusChange();
+        }
       }
-    });
+    };
 
-    ws.on('error', (err) => {
-      logger.error('ESP WebSocket error:', err.message);
-      clearTimeout(authTimeout);
-      if (pingInterval) clearInterval(pingInterval);
-
-      if (authenticatedMac && clients.get(authenticatedMac) === ws) {
-        clients.delete(authenticatedMac);
-        clientDetails.delete(authenticatedMac);
-        notifyStatusChange();
-      }
-    });
+    ws.on('close', () => { logger.info('ESP disconnected'); onDisconnect(); });
+    ws.on('error', (err) => { logger.error('ESP WebSocket error:', err.message); onDisconnect(); });
   });
 
   logger.info(`WebSocket tunnel listening on ${TUNNEL_PORT}`);
@@ -306,6 +250,7 @@ function initializeTunnel() {
 module.exports = {
   initializeTunnel,
   onStatusChange,
+  onStateChange,
   isESPConnected,
   getESPWebSocket,
   getConnectedClients,
