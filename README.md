@@ -1,6 +1,6 @@
-# ESP32 Wake-on-LAN Server
+# EspNest — ESP32 Wake-on-LAN & LED Server
 
-Servidor WebSocket/HTTP para controle remoto de múltiplos ESP32 autenticados, com interface web protegida por login, suporte a Wake-on-LAN e controle de fita LED RGB/RGBW.
+Servidor WebSocket/HTTP para controle remoto de múltiplos ESP32 autenticados, com interface web (SPA) protegida por login, suporte a Wake-on-LAN, controle de fita LED RGB/RGBW, efeitos rodando no firmware e cenas salvas.
 
 ## 📋 Descrição
 
@@ -8,9 +8,10 @@ Este sistema funciona como um servidor intermediário (tunnel) que:
 
 - Recebe conexões WebSocket de múltiplos ESP32 na porta 9001
 - Identifica cada ESP32 pelo MAC address autenticado
-- Disponibiliza interface HTTP na porta 9000 com autenticação JWT
-- Permite enviar comandos WoL e LED para um ou vários ESP32 ao mesmo tempo
-- Mantém cadastro de clientes ESP32 e cadastro separado de alvos WoL (MAC)
+- Disponibiliza interface HTTP (SPA) na porta 9000 com autenticação JWT
+- Permite enviar comandos WoL, LED e efeitos para um ou vários ESP32 ao mesmo tempo
+- Mantém cadastro de clientes ESP32, cadastro separado de alvos WoL (MAC) e cenas de cor
+- Acompanha em tempo real (SSE) o status de conexão, a cor atual e o efeito ativo de cada ESP
 
 ## 🚀 Funcionalidades
 
@@ -20,8 +21,11 @@ Este sistema funciona como um servidor intermediário (tunnel) que:
 - **Configuração remota do ESP**: ESP pode solicitar `ledCount`, `ledPin` e `ledType` via `get_config`
 - **Wake-on-LAN em lote**: Disparo para um ou vários ESPs selecionados
 - **Controle LED RGB/RGBW**: Aplicação de cor única por fita (R/G/B) e canal branco opcional (`w`) para SK6812
-- **Descoberta de ESP não cadastrado**: Lista com MAC + IP na tela de configuração
-- **Cadastro dedicado de MAC WoL**: Página separada para gerenciar alvos WoL
+- **Efeitos no firmware**: `breathing`, `rainbow` e `fade` — o servidor envia **um único comando** e a animação roda no ESP (sem fluxo contínuo de requisições). O servidor rastreia o efeito ativo por dispositivo
+- **Cenas**: salvar/aplicar/excluir presets de cor associados a dispositivos (`/api/scenes`)
+- **Atualizações em tempo real (SSE)**: eventos `status` (conexão), `state` (cor ao vivo) e `effect` (efeito ativo)
+- **Descoberta de ESP não cadastrado**: Lista com MAC + IP na tela de dispositivos
+- **Interface SPA**: navegação sem reload, seletor global de dispositivos persistente, tema escuro/claro
 - **Logs de debug WS**: mensagens enviadas/recebidas no túnel para diagnóstico
 - **Resiliência de comunicação**: timeout/offline do ESP retorna erro por dispositivo sem derrubar o processo Node.js
 
@@ -65,6 +69,14 @@ npm start
 # ou
 node src/server.js
 ```
+
+Para desenvolvimento com auto-reload (nodemon):
+
+```bash
+npm run dev
+```
+
+> O modo `dev` observa `src/` mas **ignora `src/data/*`** — assim as gravações de estado (cor atual, cenas) não disparam reinício do servidor.
 
 Serviços:
 - WebSocket tunnel: `ws://localhost:9001`
@@ -151,6 +163,21 @@ Resposta de erro:
 }
 ```
 
+**Efeito (animação roda no firmware do ESP)**
+```json
+{
+  "action": "effect",
+  "effect": "breathing",
+  "r": 255,
+  "g": 100,
+  "b": 50
+}
+```
+- `effect`: `breathing`, `rainbow`, `fade` ou `none` (para interromper)
+- `r`/`g`/`b`: cor base opcional, usada por efeitos como `breathing`
+- O servidor envia **apenas um comando**; a animação é gerada no próprio ESP
+- Enviar uma cor sólida via `action: "led"` interrompe o efeito ativo
+
 ### 4) Resposta do ESP
 
 Exemplo esperado:
@@ -162,23 +189,39 @@ Exemplo esperado:
 }
 ```
 
+Para efeito:
+
+```json
+{
+  "status": "ok",
+  "action": "effect",
+  "effect": "breathing"
+}
+```
+
 ## 🌐 Uso da interface
+
+A interface é uma SPA (single-page app) servida em todas as rotas de página; a navegação acontece no cliente, sem reload.
 
 1. Acesse `http://localhost:9000`
 2. Faça login
-3. Use as páginas:
-   - `/` Wake-on-LAN
-   - `/led` Controle LED
-   - `/config` Cadastro de ESP32
-   - `/wol-targets` Cadastro de MACs WoL
+3. Navegue pelas telas:
+   - `/` **Dashboard** — visão geral dos dispositivos, status ao vivo e o que cada LED está fazendo (cor sólida, apagado ou efeito ativo)
+   - `/led` **Controle de LED** — seletor de cor, efeitos e cenas
+   - `/wol` **Wake-on-LAN** — disparo de pacote mágico
+   - `/devices` **Dispositivos** — cadastro de ESP32, descoberta e alvos WoL
+
+> As rotas antigas `/config` e `/wol-targets` continuam funcionando como **aliases** de `/devices` (deep-links preservados).
 
 ### Comportamento atual das telas
 
-- **WOL e LED**: seleção de dispositivos via modal (um ou vários)
-- **WOL**: seleciona alvo WoL a partir de cadastro dedicado (`/wol-targets`)
-- **LED**: seletor de cor aplica automaticamente ao clicar/arrastar no picker
-- **LED (RGBW)**: quando houver ESP SK6812 selecionado, aparece slider de branco acima de "Tons"
-- **Configuração ESP**: cadastro por MAC do ESP, apelido, `ledCount`, `ledPin` e `ledType` (`ws2812b`/`sk6812`)
+- **Seletor global de dispositivos**: uma barra persistente no topo (em LED e WoL) permite escolher um ou vários ESPs **uma única vez**; a seleção é compartilhada entre as telas e salva no navegador
+- **Tema**: escuro por padrão, com alternância para claro (preferência salva)
+- **Dashboard**: cada card mostra status de conexão e o estado do LED — para efeito ativo, exibe o nome (Respiração/Arco-íris/Transição) com swatch animado
+- **LED**: seletor de cor (anel de matiz + quadrado saturação/valor) que aplica ao vivo nos selecionados; favoritos rápidos; **efeitos** com iniciar/parar; **cenas** com preview de cor e aplicação em 1 toque
+- **LED (RGBW)**: quando houver ESP SK6812 selecionado, aparece o controle do canal branco (`w`)
+- **WoL**: lista de alvos pesquisável; dispara via ESPs selecionados com feedback por dispositivo
+- **Dispositivos**: cadastro por MAC do ESP, apelido, `ledCount`, `ledPin` e `ledType` (`ws2812b`/`sk6812`); ESPs descobertos aparecem com botão "Registrar" (fluxo guiado); gerenciamento de alvos WoL na mesma tela
 
 ## 🔗 API Endpoints
 
@@ -187,11 +230,14 @@ Exemplo esperado:
 - `POST /auth`
 - `GET /logout`
 
-### Status
-- `GET /api/status` (SSE)
+### Status (SSE)
+- `GET /api/status` — stream de eventos Server-Sent Events:
+  - `event: status` → `{ "connected": true, "connectedClients": ["7C:87:CE:28:09:68"] }`
+  - `event: state` → `{ "espMac": "...", "r": 255, "g": 0, "b": 0, "w": 0 }` (cor ao vivo)
+  - `event: effect` → `{ "espMac": "...", "effect": "breathing" }` (ou `"effect": null` quando interrompido)
 
 ### Clientes ESP
-- `GET /api/clients`
+- `GET /api/clients` — inclui `connected`, `lastLedColor` e `activeEffect` por dispositivo
 - `POST /api/clients`
 - `GET /api/clients/discovered`
 
@@ -199,9 +245,15 @@ Exemplo esperado:
 - `GET /api/wol-targets`
 - `POST /api/wol-targets`
 
+### Cenas
+- `GET /api/scenes`
+- `POST /api/scenes`
+- `DELETE /api/scenes/{id}`
+
 ### Ações
 - `POST /wol`
 - `POST /led`
+- `POST /effect`
 
 ### Exemplos de request
 
@@ -228,8 +280,32 @@ Observações para `POST /led`:
 - `w` é opcional e deve estar entre `0` e `255`
 - o servidor só envia `w` para ESPs cadastrados com `ledType: "sk6812"`
 - ESPs `ws2812b` recebem apenas `r`, `g` e `b`
+- aplicar uma cor sólida interrompe qualquer efeito ativo no(s) dispositivo(s)
 
-**Response de ações (resumo por dispositivo)**
+**POST /effect**
+```json
+{
+  "espMacs": ["7C:87:CE:28:09:68"],
+  "effect": "breathing",
+  "r": 255,
+  "g": 100,
+  "b": 50
+}
+```
+- `effect`: `breathing`, `rainbow`, `fade` ou `none` (interrompe)
+- `r`/`g`/`b`: cor base opcional
+- o efeito ativo é rastreado pelo servidor e propagado via SSE (`event: effect`)
+
+**POST /api/scenes**
+```json
+{
+  "name": "Aconchego",
+  "color": { "r": 255, "g": 120, "b": 40 },
+  "espMacs": ["7C:87:CE:28:09:68"]
+}
+```
+
+**Response de ações (`/wol`, `/led`, `/effect` — resumo por dispositivo)**
 ```json
 {
   "status": "ok",
@@ -242,36 +318,64 @@ Observações para `POST /led`:
 }
 ```
 
+**Response de `GET /api/clients`**
+```json
+{
+  "clients": [
+    {
+      "espMac": "7C:87:CE:28:09:68",
+      "nickname": "Sala",
+      "ledCount": 90,
+      "ledPin": 13,
+      "ledType": "ws2812b",
+      "lastLedColor": { "r": 255, "g": 77, "b": 148 },
+      "connected": true,
+      "activeEffect": "breathing"
+    }
+  ]
+}
+```
+- `activeEffect` é `null` quando o LED está em cor sólida ou apagado
+
 ## 📁 Estrutura do Projeto
 
 ```text
 esp32-wol-server/
 ├── src/
-│   ├── server.js
+│   ├── server.js                 # HTTP server + roteamento; serve o shell SPA e os assets
 │   ├── config.js
 │   ├── auth/
 │   │   ├── jwt.js
 │   │   └── hmac.js
 │   ├── routes/
 │   │   ├── auth.js
-│   │   └── api.js
+│   │   └── api.js                # endpoints REST/SSE + comandos (wol/led/effect) + cenas
 │   ├── websocket/
 │   │   └── espTunnel.js
 │   ├── data/
 │   │   ├── clientsStore.js
 │   │   ├── clients.json
 │   │   ├── wolTargetsStore.js
-│   │   └── wolTargets.json
+│   │   ├── wolTargets.json
+│   │   ├── scenesStore.js
+│   │   └── scenes.json
 │   ├── utils/
 │   │   ├── logger.js
-│   │   └── sse.js
-│   └── views/
+│   │   ├── sse.js                # eventos status/state/effect
+│   │   └── static.js             # serve /assets/* de src/public
+│   ├── views/
+│   │   └── index.js              # carrega o shell (public/index.html) e o login
+│   └── public/                   # frontend SPA (vanilla JS, ESM, sem build)
+│       ├── index.html            # shell do app
 │       ├── login.html
-│       ├── control.html
-│       ├── led.html
-│       ├── config.html
-│       ├── wol-targets.html
-│       └── index.js
+│       └── assets/js/
+│           ├── main.js           # bootstrap: chrome, SSE, roteador
+│           ├── api.js            # wrapper fetch dos endpoints
+│           ├── store.js          # estado central + ponte SSE
+│           ├── router.js         # roteador por pathname
+│           ├── ui.js             # toasts, modais, tema, ícones
+│           ├── components/       # deviceSelector, colorControl, sceneCard, resultToast
+│           └── views/            # dashboard, led, wol, devices
 ├── package.json
 └── README.md
 ```

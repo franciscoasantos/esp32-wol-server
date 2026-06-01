@@ -1,11 +1,11 @@
 {
-  "name": "esp32-wol-server",
+  "name": "espnest",
   "version": "1.0.0",
-  "description": "Servidor de túnel WebSocket/HTTP para comunicação com ESP32/ESP8266",
+  "description": "Hub de automação residencial para controle de ESP32 — LED, Wake-on-LAN e gerenciamento de dispositivos",
   "main": "server.js",
   "scripts": {
     "start": "node src/server.js",
-    "dev": "nodemon --watch src --ext js,json,html --exec node src/server.js",
+    "dev": "nodemon --watch src --ext js,json,html --ignore \"src/data/*\" --exec node src/server.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

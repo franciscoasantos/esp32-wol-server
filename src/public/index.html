@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="pt-BR" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#09090b" />
+  <title>EspNest</title>
+
+  <!-- Evita flash de tema: aplica a preferência salva antes do render -->
+  <script>
+    (function () {
+      try {
+        var t = localStorage.getItem('espnest:theme');
+        if (t === 'light') document.documentElement.classList.remove('dark');
+        else document.documentElement.classList.add('dark');
+      } catch (e) {}
+    })();
+  </script>
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['ui-sans-serif', 'system-ui', '-apple-system', 'Segoe UI', 'Roboto', 'sans-serif']
+          }
+        }
+      }
+    };
+  </script>
+
+  <style type="text/tailwindcss">
+    @layer base {
+      html { -webkit-tap-highlight-color: transparent; }
+      body { @apply bg-zinc-50 text-zinc-900 antialiased dark:bg-zinc-950 dark:text-zinc-100; }
+      ::-webkit-scrollbar { @apply w-2 h-2; }
+      ::-webkit-scrollbar-thumb { @apply rounded-full bg-zinc-300 dark:bg-zinc-700; }
+    }
+    @layer components {
+      .card { @apply rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900; }
+      .surface { @apply rounded-xl border border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/60; }
+      .muted { @apply text-zinc-500 dark:text-zinc-400; }
+      .field {
+        @apply w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900
+        placeholder:text-zinc-400 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30
+        dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100 dark:placeholder:text-zinc-500;
+      }
+      .label { @apply mb-1.5 block text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400; }
+      .btn {
+        @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium
+        transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500/40 disabled:cursor-not-allowed disabled:opacity-50;
+      }
+      .btn-primary { @apply btn bg-indigo-600 text-white hover:bg-indigo-500; }
+      .btn-ghost { @apply btn border border-zinc-300 text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800; }
+      .btn-danger { @apply btn bg-red-600 text-white hover:bg-red-500; }
+      .btn-subtle { @apply btn text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800; }
+      .chip {
+        @apply inline-flex items-center gap-2 rounded-full border px-3.5 py-1.5 text-[13px] font-medium transition-colors;
+      }
+      .navlink {
+        @apply flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-zinc-500 transition-colors
+        hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100;
+      }
+      .navlink-active { @apply bg-indigo-500/10 text-indigo-600 hover:bg-indigo-500/10 hover:text-indigo-600 dark:text-indigo-400 dark:hover:text-indigo-400; }
+    }
+  </style>
+</head>
+<body>
+  <!-- Backdrop do sidebar (mobile) -->
+  <div id="sidebar-backdrop" class="fixed inset-0 z-40 hidden bg-black/50 lg:hidden"></div>
+
+  <!-- Sidebar -->
+  <aside id="sidebar"
+    class="fixed left-0 top-0 z-50 flex h-full w-64 -translate-x-full flex-col border-r border-zinc-200 bg-white transition-transform duration-200 dark:border-zinc-800 dark:bg-zinc-900 lg:translate-x-0">
+    <div class="flex h-16 shrink-0 items-center gap-3 border-b border-zinc-200 px-5 dark:border-zinc-800">
+      <div class="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-600 text-white">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z"/></svg>
+      </div>
+      <div>
+        <div class="text-base font-bold tracking-tight">EspNest</div>
+        <div class="text-[11px] muted">Controle ESP32</div>
+      </div>
+    </div>
+    <nav id="nav-links" class="flex flex-1 flex-col gap-1 overflow-y-auto p-3"></nav>
+    <div class="shrink-0 border-t border-zinc-200 p-3 dark:border-zinc-800">
+      <a href="/logout" class="navlink hover:text-red-500 dark:hover:text-red-400">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" class="h-5 w-5"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9"/></svg>
+        Sair
+      </a>
+    </div>
+  </aside>
+
+  <!-- Conteúdo -->
+  <div class="flex min-h-screen flex-col lg:pl-64">
+    <!-- Topbar -->
+    <header class="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-zinc-200 bg-zinc-50/90 px-4 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/90 sm:px-6">
+      <button id="menu-btn" class="rounded-lg p-2 text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 lg:hidden" aria-label="Menu">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" class="h-6 w-6"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5"/></svg>
+      </button>
+      <div class="min-w-0 flex-1">
+        <h1 id="page-title" class="truncate text-lg font-semibold tracking-tight">Dashboard</h1>
+      </div>
+      <div id="conn-indicator" class="hidden items-center gap-2 rounded-full border border-zinc-200 px-3 py-1.5 text-xs font-medium dark:border-zinc-800 sm:flex">
+        <span id="conn-dot" class="h-2 w-2 rounded-full bg-zinc-400"></span>
+        <span id="conn-text" class="muted">conectando…</span>
+      </div>
+      <button id="theme-btn" class="rounded-lg p-2 text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800" aria-label="Alternar tema"></button>
+    </header>
+
+    <!-- Barra global de seleção de dispositivos (mostrada nas views que usam) -->
+    <div id="device-bar" class="sticky top-16 z-20 hidden border-b border-zinc-200 bg-zinc-50/90 px-4 py-3 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/90 sm:px-6"></div>
+
+    <!-- View montada pelo roteador -->
+    <main id="view" class="mx-auto w-full max-w-5xl flex-1 px-4 py-6 pb-24 sm:px-6 lg:pb-8"></main>
+  </div>
+
+  <!-- Bottom nav (mobile) -->
+  <nav id="bottom-nav" class="fixed bottom-0 left-0 right-0 z-40 flex h-16 items-stretch border-t border-zinc-200 bg-white/95 backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/95 lg:hidden"></nav>
+
+  <div id="toast-root" class="pointer-events-none fixed right-4 top-20 z-[60] flex w-[calc(100%-2rem)] max-w-sm flex-col gap-2 sm:w-auto"></div>
+  <div id="modal-root"></div>
+
+  <script type="module" src="/assets/js/main.js"></script>
+</body>
+</html>
