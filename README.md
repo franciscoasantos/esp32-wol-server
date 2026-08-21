@@ -15,7 +15,8 @@ Este sistema funciona como um servidor intermediário (tunnel) que:
 
 ## 🚀 Funcionalidades
 
-- **Autenticação JWT**: Login seguro com token válido por **7 dias**
+- **Autenticação JWT**: Login seguro com sessão de **30 dias e renovação deslizante** — enquanto o app for aberto, o login não expira
+- **Instalável (PWA)**: manifest + service worker mínimo; dá para instalar na tela inicial do celular (exige HTTPS fora de `localhost`)
 - **Túnel WebSocket**: Comunicação em tempo real com múltiplos ESP32
 - **Autenticação HMAC + MAC**: ESP envia `token`, `hmac` e `mac` no handshake
 - **Configuração remota do ESP**: ESP pode solicitar `ledCount`, `ledPin` e `ledType` via `get_config`
@@ -68,6 +69,12 @@ HTTP_PORT=9000
 npm start
 # ou
 node src/server.js
+```
+
+Auto-teste da sessão (sem framework):
+
+```bash
+node src/auth/jwt.test.js
 ```
 
 Para desenvolvimento com auto-reload (nodemon):
@@ -230,6 +237,15 @@ A interface é uma SPA (single-page app) servida em todas as rotas de página; a
 - `POST /auth`
 - `GET /logout`
 
+O cookie `token` é `HttpOnly; Path=/; Max-Age=30d; SameSite=Lax`, e ganha `Secure` automaticamente quando a requisição chega com `X-Forwarded-Proto: https` (proxy reverso). Requisições autenticadas na segunda metade da vida do token recebem um cookie novo — a sessão desliza.
+
+### PWA
+- `GET /manifest.json` — público
+- `GET /sw.js` — público, servido na raiz para ter escopo `/`
+
+> O service worker **não faz cache** de propósito: sem rede não há ESP32 para controlar. Ele existe só para satisfazer o critério de instalação do navegador. Instalar exige contexto seguro — `localhost` ou HTTPS via proxy reverso.
+> Ícone: `src/public/assets/icon.svg`. Para instalar em iPhone, adicione um PNG 180×180 em `assets/apple-touch-icon.png` (iOS ignora ícones SVG do manifest).
+
 ### Status (SSE)
 - `GET /api/status` — stream de eventos Server-Sent Events:
   - `event: status` → `{ "connected": true, "connectedClients": ["7C:87:CE:28:09:68"] }`
@@ -345,7 +361,8 @@ esp32-wol-server/
 │   ├── server.js                 # HTTP server + roteamento; serve o shell SPA e os assets
 │   ├── config.js
 │   ├── auth/
-│   │   ├── jwt.js
+│   │   ├── jwt.js                # sessão: token, cookie e renovação deslizante
+│   │   ├── jwt.test.js
 │   │   └── hmac.js
 │   ├── routes/
 │   │   ├── auth.js
@@ -368,14 +385,18 @@ esp32-wol-server/
 │   └── public/                   # frontend SPA (vanilla JS, ESM, sem build)
 │       ├── index.html            # shell do app
 │       ├── login.html
-│       └── assets/js/
-│           ├── main.js           # bootstrap: chrome, SSE, roteador
-│           ├── api.js            # wrapper fetch dos endpoints
-│           ├── store.js          # estado central + ponte SSE
-│           ├── router.js         # roteador por pathname
-│           ├── ui.js             # toasts, modais, tema, ícones
-│           ├── components/       # deviceSelector, colorControl, sceneCard, resultToast
-│           └── views/            # dashboard, led, wol, devices
+│       └── assets/
+│           ├── manifest.json     # PWA
+│           ├── sw.js             # service worker mínimo (sem cache)
+│           ├── icon.svg
+│           └── js/
+│               ├── main.js       # bootstrap: chrome, SSE, roteador
+│               ├── api.js        # wrapper fetch dos endpoints
+│               ├── store.js      # estado central + ponte SSE
+│               ├── router.js     # roteador por pathname
+│               ├── ui.js         # toasts, modais, tema, ícones
+│               ├── components/   # deviceSelector, colorControl, sceneCard, resultToast
+│               └── views/        # dashboard, led, wol, devices
 ├── package.json
 └── README.md
 ```

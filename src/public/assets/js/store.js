@@ -99,6 +99,12 @@ export const store = {
     const es = new EventSource('/api/status');
     state._sse = es;
 
+    es.onerror = () => {
+      // CONNECTING = queda de rede, o próprio EventSource reconecta.
+      // CLOSED = 401/sessão morta — não há retry, então volta pro login.
+      if (es.readyState === EventSource.CLOSED) location.href = '/login';
+    };
+
     es.addEventListener('status', (ev) => {
       try {
         const data = JSON.parse(ev.data);

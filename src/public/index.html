@@ -6,6 +6,12 @@
   <meta name="theme-color" content="#09090b" />
   <title>EspNest</title>
 
+  <link rel="manifest" href="/manifest.json" />
+  <link rel="icon" href="/assets/icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="/assets/icon.svg" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <script>navigator.serviceWorker?.register('/sw.js');</script>
+
   <!-- Evita flash de tema: aplica a preferência salva antes do render -->
   <script>
     (function () {

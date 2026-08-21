@@ -1,7 +1,7 @@
 const http = require('http');
 const logger = require('./utils/logger');
 const { HTTP_PORT } = require('./config');
-const { checkJWT } = require('./auth/jwt');
+const { checkJWT, generateToken, sessionCookie, shouldRenew } = require('./auth/jwt');
 const { handleLogin, handleLogout, handleAuth } = require('./routes/auth');
 const {
   handleAppShell,
@@ -61,9 +61,22 @@ const httpServer = http.createServer((req, res) => {
     return handleStatic(req, res);
   }
 
+  // PWA: manifest e service worker precisam ser públicos e servidos na raiz (escopo /).
+  if (req.method === "GET" && (req.url === "/sw.js" || req.url === "/manifest.json")) {
+    req.url = "/assets" + req.url;
+    return handleStatic(req, res);
+  }
+
+  // SESSÃO — renovação deslizante: enquanto o app for aberto, o login nunca expira.
+  // setHeader antes do handler é mesclado pelo writeHead que ele chama depois (inclui SSE).
+  const session = checkJWT(req);
+  if (session && shouldRenew(session)) {
+    res.setHeader('Set-Cookie', sessionCookie(req, generateToken(session.user)));
+  }
+
   // SSE STATUS ENDPOINT (needs auth)
   if (req.url === "/api/status" && req.method === "GET") {
-    if (!checkJWT(req)) {
+    if (!session) {
       res.writeHead(401);
       return res.end("Unauthorized");
     }
@@ -71,7 +84,7 @@ const httpServer = http.createServer((req, res) => {
   }
 
   // PROTECTED ROUTES
-  if (!checkJWT(req)) {
+  if (!session) {
     res.writeHead(302, { Location: "/login" });
     return res.end();
   }

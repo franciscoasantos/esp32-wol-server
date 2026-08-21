@@ -1,4 +1,4 @@
-const { generateToken } = require('../auth/jwt');
+const { generateToken, sessionCookie } = require('../auth/jwt');
 const { loginPage } = require('../views');
 const { LOGIN_USER, LOGIN_PASS } = require('../config');
 
@@ -27,7 +27,7 @@ function handleAuth(req, res) {
     if (user === LOGIN_USER && pass === LOGIN_PASS) {
       const token = generateToken(user);
       res.writeHead(302, {
-        "Set-Cookie": `token=${token}; HttpOnly; Path=/`,
+        "Set-Cookie": sessionCookie(req, token),
         "Location": "/"
       });
       return res.end();
