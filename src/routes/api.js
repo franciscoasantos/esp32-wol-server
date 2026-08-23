@@ -1,38 +1,25 @@
 const { appShell } = require('../views');
-const {
-  normalizeMac,
-  getClients,
-  getClientByMac,
-  upsertClient,
-  setLastLedColor,
-  setLastPattern
-} = require('../data/clientsStore');
+const { normalizeMac, getClients, upsertClient } = require('../data/clientsStore');
 const { getWolTargets, upsertWolTarget } = require('../data/wolTargetsStore');
 const { getScenes, saveScene, deleteScene } = require('../data/scenesStore');
 const {
   isESPConnected,
-  sendCommandToESP,
   getConnectedClients,
   getConnectedClientDetails
 } = require('../websocket/espTunnel');
-const { addClient, removeClient, notifyClientState, notifyClientEffect } = require('../utils/sse');
-
-// Efeito ativo por dispositivo (em memória). O ESP roda o efeito no firmware e
-// não reporta estado de volta, então o servidor é a fonte da verdade aqui.
-const activeEffects = new Map(); // espMac -> effect ('breathing' | 'rainbow' | 'fade')
-
-function setActiveEffect(espMac, effect) {
-  if (!effect || effect === 'none') {
-    activeEffects.delete(espMac);
-  } else {
-    activeEffects.set(espMac, effect);
-  }
-  notifyClientEffect(espMac, effect && effect !== 'none' ? effect : null);
-}
-
-function getActiveEffect(espMac) {
-  return activeEffects.get(espMac) || null;
-}
+const {
+  getActiveEffect,
+  applyColor,
+  applyPattern,
+  applyEffect,
+  sendWol
+} = require('../services/ledService');
+const { addClient, removeClient } = require('../utils/sse');
+const wakeRitual = require('../services/wakeRitual');
+const { pulse } = require('../services/notify');
+const { getSchedules, upsertSchedule, deleteSchedule } = require('../data/schedulesStore');
+const { describeToday, runAction } = require('../services/scheduler');
+const sunrise = require('../services/sunrise');
 
 function sendJson(res, status, payload) {
   res.writeHead(status, { 'Content-Type': 'application/json' });
@@ -191,19 +178,6 @@ function parseEspTargets(body) {
   return targets;
 }
 
-function buildResultSummary(action, results) {
-  const okCount = results.filter((item) => item.ok).length;
-  const failCount = results.length - okCount;
-
-  return {
-    status: okCount > 0 ? 'ok' : 'error',
-    action,
-    okCount,
-    failCount,
-    results
-  };
-}
-
 async function handleWOL(req, res) {
   try {
     const body = await parseJsonBody(req);
@@ -220,29 +194,7 @@ async function handleWOL(req, res) {
     }
 
     const targetMac = explicitMac || targetMacFromList;
-    const results = await Promise.all(targets.map(async (espMac) => {
-      const client = getClientByMac(espMac);
-      if (!client) {
-        return { espMac, ok: false, error: 'Cliente não encontrado' };
-      }
-
-      if (!targetMac) {
-        return { espMac, ok: false, error: 'MAC alvo não informado' };
-      }
-
-      try {
-        const response = await sendCommandToESP(espMac, { action: 'wol', mac: targetMac });
-        if (response?.status === 'error') {
-          return { espMac, ok: false, error: response.error || 'Falha na comunicação com ESP' };
-        }
-
-        return { espMac, ok: true, response };
-      } catch (error) {
-        return { espMac, ok: false, error: error.message };
-      }
-    }));
-
-    return sendJson(res, 200, buildResultSummary('wol', results));
+    return sendJson(res, 200, await sendWol(targets, targetMac));
   } catch (error) {
     const status = error.message === 'Invalid JSON' ? 400 : 422;
     return sendJson(res, status, { error: error.message });
@@ -282,46 +234,7 @@ async function handleLED(req, res) {
     const white = parseWhite(body);
     const fadeMs = parseFadeMs(body);
 
-    const results = await Promise.all(targets.map(async (espMac) => {
-      const client = getClientByMac(espMac);
-      if (!client) {
-        return { espMac, ok: false, error: 'Cliente não encontrado' };
-      }
-
-      try {
-        const command = { action: 'led', r: color.r, g: color.g, b: color.b };
-        if (client.ledType === 'sk6812' && white !== null) {
-          command.w = white;
-        }
-        if (fadeMs) {
-          command.fadeMs = fadeMs;
-        }
-
-        const response = await sendCommandToESP(espMac, command);
-        if (response?.status === 'error') {
-          return { espMac, ok: false, error: response.error || 'Falha na comunicação com ESP' };
-        }
-
-        // Usa valores confirmados pelo ESP no ACK (ou fallback para os do request)
-        const confirmedColor = {
-          r: typeof response?.r === 'number' ? response.r : color.r,
-          g: typeof response?.g === 'number' ? response.g : color.g,
-          b: typeof response?.b === 'number' ? response.b : color.b
-        };
-        // Caminho quente: atualiza a cor em memória e grava com debounce, em
-        // vez de reescrever clients.json a cada comando.
-        setLastLedColor(espMac, confirmedColor);
-        // Cor sólida interrompe qualquer efeito ativo (espelha o firmware)
-        setActiveEffect(espMac, 'none');
-        notifyClientState(espMac, { ...confirmedColor, w: response?.w || 0 });
-
-        return { espMac, ok: true, response };
-      } catch (error) {
-        return { espMac, ok: false, error: error.message };
-      }
-    }));
-
-    return sendJson(res, 200, buildResultSummary('led', results));
+    return sendJson(res, 200, await applyColor(targets, { ...color, w: white, fadeMs }));
   } catch (error) {
     const status = error.message === 'Invalid JSON' ? 400 : 422;
     return sendJson(res, status, { error: error.message });
@@ -413,32 +326,8 @@ async function sendPattern(req, res, action, parsePayload, buildCommand) {
     // 422 da requisição inteira, não uma falha por dispositivo.
     const parsed = parsePayload(body);
 
-    const results = await Promise.all(targets.map(async (espMac) => {
-      const client = getClientByMac(espMac);
-      if (!client) {
-        return { espMac, ok: false, error: 'Cliente não encontrado' };
-      }
-
-      try {
-        const { command, pattern, representative } = buildCommand(parsed, client);
-        if (fadeMs) command.fadeMs = fadeMs;
-
-        const response = await sendCommandToESP(espMac, command);
-        if (response?.status === 'error') {
-          return { espMac, ok: false, error: response.error || 'Falha na comunicação com ESP' };
-        }
-
-        setLastPattern(espMac, pattern, representative);
-        setActiveEffect(espMac, 'none');
-        notifyClientState(espMac, { ...representative, w: representative.w || 0 });
-
-        return { espMac, ok: true, response };
-      } catch (error) {
-        return { espMac, ok: false, error: error.message };
-      }
-    }));
-
-    return sendJson(res, 200, buildResultSummary(action, results));
+    const summary = await applyPattern(targets, action, (client) => buildCommand(parsed, client), fadeMs);
+    return sendJson(res, 200, summary);
   } catch (error) {
     const status = error.message === 'Invalid JSON' ? 400 : 422;
     return sendJson(res, status, { error: error.message });
@@ -507,31 +396,123 @@ async function handleEffect(req, res) {
     const speed = parseEffectParam(body, 'speed');
     const intensity = parseEffectParam(body, 'intensity');
 
-    const results = await Promise.all(targets.map(async (espMac) => {
-      const client = getClientByMac(espMac);
-      if (!client) {
-        return { espMac, ok: false, error: 'Cliente não encontrado' };
-      }
+    return sendJson(res, 200, await applyEffect(targets, { effect, color, speed, intensity }));
+  } catch (error) {
+    const status = error.message === 'Invalid JSON' ? 400 : 422;
+    return sendJson(res, status, { error: error.message });
+  }
+}
 
-      try {
-        const command = { action: 'effect', effect };
-        if (color) { command.r = color.r; command.g = color.g; command.b = color.b; }
-        if (speed !== null) { command.speed = speed; }
-        if (intensity !== null) { command.intensity = intensity; }
+// Rampa do nascer do sol sob demanda (o agendador usa o mesmo serviço).
+async function handleSunrise(req, res) {
+  try {
+    const body = await parseJsonBody(req);
+    const targets = parseEspTargets(body);
 
-        const response = await sendCommandToESP(espMac, command);
-        if (response?.status === 'error') {
-          return { espMac, ok: false, error: response.error || 'Falha na comunicação com ESP' };
-        }
-        // Registra o efeito ativo (ou limpa se 'none') e propaga via SSE
-        setActiveEffect(espMac, effect);
-        return { espMac, ok: true, response };
-      } catch (error) {
-        return { espMac, ok: false, error: error.message };
-      }
-    }));
+    if (body?.stop) {
+      const stopped = targets.filter((espMac) => sunrise.stop(espMac));
+      return sendJson(res, 200, { status: 'ok', action: 'sunrise', stopped });
+    }
 
-    return sendJson(res, 200, buildResultSummary('effect', results));
+    const durationMin = Number.isInteger(body?.durationMin) ? body.durationMin : 20;
+    if (durationMin < 1 || durationMin > 120) {
+      return sendJson(res, 422, { error: 'durationMin deve estar entre 1 e 120' });
+    }
+
+    const started = targets.map((espMac) => ({ espMac, ...sunrise.start(espMac, durationMin) }));
+    return sendJson(res, 200, { status: 'ok', action: 'sunrise', started });
+  } catch (error) {
+    const status = error.message === 'Invalid JSON' ? 400 : 422;
+    return sendJson(res, status, { error: error.message });
+  }
+}
+
+function handleGetSchedules(_req, res) {
+  // Junta o horário calculado de hoje: para gatilhos solares o cadastro só
+  // guarda o deslocamento, então a UI não teria como mostrar a hora.
+  const timing = new Map(describeToday().map((item) => [item.id, item]));
+  const schedules = getSchedules().map((schedule) => ({
+    ...schedule,
+    todayMinutes: timing.get(schedule.id)?.minutes ?? null,
+    ranToday: timing.get(schedule.id)?.ranToday ?? false
+  }));
+  return sendJson(res, 200, { schedules });
+}
+
+async function handleUpsertSchedule(req, res) {
+  try {
+    const body = await parseJsonBody(req);
+    return sendJson(res, 200, { schedule: upsertSchedule(body) });
+  } catch (error) {
+    const status = error.message === 'Invalid JSON' ? 400 : 422;
+    return sendJson(res, status, { error: error.message });
+  }
+}
+
+function handleDeleteSchedule(req, res, id) {
+  try {
+    deleteSchedule(id);
+    return sendJson(res, 200, { ok: true });
+  } catch (error) {
+    return sendJson(res, 404, { error: error.message });
+  }
+}
+
+// Dispara a rotina na hora, sem esperar o gatilho. Útil para conferir se o
+// que foi cadastrado faz o que se espera.
+async function handleRunSchedule(req, res, id) {
+  const schedule = getSchedules().find((item) => item.id === id);
+  if (!schedule) {
+    return sendJson(res, 404, { error: 'Rotina não encontrada' });
+  }
+
+  try {
+    const result = await runAction(schedule);
+    return sendJson(res, 200, result || { status: 'ok' });
+  } catch (error) {
+    return sendJson(res, 500, { error: error.message });
+  }
+}
+
+// Pisca uma cor e devolve a fita ao que estava.
+async function handleNotify(req, res) {
+  try {
+    const body = await parseJsonBody(req);
+    const targets = parseEspTargets(body);
+    const color = parseRgb(body?.color || body);
+
+    const times = Number.isInteger(body?.times) ? body.times : 3;
+    if (times < 1 || times > 10) {
+      return sendJson(res, 422, { error: 'times deve estar entre 1 e 10' });
+    }
+
+    const result = await pulse(targets, color, { times, restoreAfter: body?.restore !== false });
+    return sendJson(res, 200, { status: 'ok', action: 'notify', ...result });
+  } catch (error) {
+    const status = error.message === 'Invalid JSON' ? 400 : 422;
+    return sendJson(res, status, { error: error.message });
+  }
+}
+
+// WoL + fita como barra de progresso enquanto sonda o alvo.
+async function handleWakeRitual(req, res) {
+  try {
+    const body = await parseJsonBody(req);
+    const targets = parseEspTargets(body);
+
+    const targetMac = body?.targetMac ? normalizeMac(body.targetMac) : null;
+    if (!targetMac) {
+      return sendJson(res, 422, { error: 'targetMac é obrigatório' });
+    }
+
+    const host = typeof body?.host === 'string' ? body.host.trim() : null;
+    const timeoutMs = Number.isInteger(body?.timeoutMs) ? body.timeoutMs : 90000;
+    if (timeoutMs < 5000 || timeoutMs > 600000) {
+      return sendJson(res, 422, { error: 'timeoutMs deve estar entre 5000 e 600000' });
+    }
+
+    const result = await wakeRitual.run({ espMacs: targets, targetMac, host, timeoutMs });
+    return sendJson(res, 200, { status: 'ok', action: 'wake-ritual', ...result });
   } catch (error) {
     const status = error.message === 'Invalid JSON' ? 400 : 422;
     return sendJson(res, status, { error: error.message });
@@ -553,5 +534,12 @@ module.exports = {
   handleSegments,
   handleGetScenes,
   handleSaveScene,
-  handleDeleteScene
+  handleDeleteScene,
+  handleSunrise,
+  handleGetSchedules,
+  handleUpsertSchedule,
+  handleDeleteSchedule,
+  handleRunSchedule,
+  handleNotify,
+  handleWakeRitual
 };

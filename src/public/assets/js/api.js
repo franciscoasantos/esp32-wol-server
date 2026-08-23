@@ -51,6 +51,17 @@ export const api = {
   sendEffect: (payload) => req('POST', '/effect', payload),
   // Padrões estáticos: o firmware interpola/preenche, então o payload é
   // pequeno mesmo numa fita de 589 LEDs.
+  // Rampa do nascer do sol sob demanda; { stop: true } interrompe
+  sendSunrise: (payload) => req('POST', '/sunrise', payload),
+  // Automação
+  getSchedules: () => req('GET', '/api/schedules').then((d) => d.schedules || []),
+  upsertSchedule: (payload) => req('POST', '/api/schedules', payload).then((d) => d.schedule),
+  deleteSchedule: (id) => req('DELETE', `/api/schedules/${encodeURIComponent(id)}`),
+  runSchedule: (id) => req('POST', `/api/schedules/${encodeURIComponent(id)}/run`),
+  // Pisca uma cor e devolve a fita ao estado anterior
+  notify: (payload) => req('POST', '/api/notify', payload),
+  // WoL com a fita como barra de progresso enquanto sonda o alvo
+  wakeRitual: (payload) => req('POST', '/wol/ritual', payload),
   sendGradient: (payload) => req('POST', '/gradient', payload),
   sendSegments: (payload) => req('POST', '/segments', payload),
 };

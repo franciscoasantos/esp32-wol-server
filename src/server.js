@@ -18,15 +18,26 @@ const {
   handleSegments,
   handleGetScenes,
   handleSaveScene,
-  handleDeleteScene
+  handleDeleteScene,
+  handleSunrise,
+  handleGetSchedules,
+  handleUpsertSchedule,
+  handleDeleteSchedule,
+  handleRunSchedule,
+  handleNotify,
+  handleWakeRitual
 } = require('./routes/api');
 const { handleStatic } = require('./utils/static');
 const { initializeTunnel, onStatusChange, onStateChange } = require('./websocket/espTunnel');
 const { notifyClients, notifyClientState } = require('./utils/sse');
 const { setLastLedColor } = require('./data/clientsStore');
+const scheduler = require('./services/scheduler');
 
 // Initialize WebSocket tunnel
 initializeTunnel();
+
+// Rotinas agendadas: tick de 30s comparando o relógio local
+scheduler.start();
 
 // Listen to ESP connection status changes and notify SSE clients
 onStatusChange((connectedClients) => {
@@ -90,7 +101,7 @@ const httpServer = http.createServer((req, res) => {
 
   // SPA PAGE ROUTES — todas servem o mesmo shell; o roteador no cliente decide.
   // Mantém /config e /wol-targets como aliases para deep-links antigos.
-  if (req.method === "GET" && ["/", "/led", "/wol", "/devices", "/config", "/wol-targets"].includes(req.url)) {
+  if (req.method === "GET" && ["/", "/led", "/wol", "/routines", "/devices", "/config", "/wol-targets"].includes(req.url)) {
     return handleAppShell(req, res);
   }
 
@@ -152,6 +163,39 @@ const httpServer = http.createServer((req, res) => {
   if (req.url.startsWith("/api/scenes/") && req.method === "DELETE") {
     const sceneId = req.url.slice("/api/scenes/".length);
     return handleDeleteScene(req, res, sceneId);
+  }
+
+  // SUNRISE
+  if (req.url === "/sunrise" && req.method === "POST") {
+    return handleSunrise(req, res);
+  }
+
+  // AUTOMATION API
+  if (req.url === "/api/schedules" && req.method === "GET") {
+    return handleGetSchedules(req, res);
+  }
+
+  if (req.url === "/api/schedules" && req.method === "POST") {
+    return handleUpsertSchedule(req, res);
+  }
+
+  if (req.url.startsWith("/api/schedules/") && req.url.endsWith("/run") && req.method === "POST") {
+    const scheduleId = req.url.slice("/api/schedules/".length, -"/run".length);
+    return handleRunSchedule(req, res, scheduleId);
+  }
+
+  if (req.url.startsWith("/api/schedules/") && req.method === "DELETE") {
+    const scheduleId = req.url.slice("/api/schedules/".length);
+    return handleDeleteSchedule(req, res, scheduleId);
+  }
+
+  if (req.url === "/api/notify" && req.method === "POST") {
+    return handleNotify(req, res);
+  }
+
+  // WAKE RITUAL
+  if (req.url === "/wol/ritual" && req.method === "POST") {
+    return handleWakeRitual(req, res);
   }
 
   // 404
