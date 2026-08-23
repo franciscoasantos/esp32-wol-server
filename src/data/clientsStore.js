@@ -31,27 +31,74 @@ function ensureDataFile() {
   }
 }
 
+// O arquivo é lido uma vez e mantido em memória. Antes cada comando de LED
+// fazia read + parse + stringify + write do arquivo inteiro, ~7x/s durante um
+// arraste no seletor de cor, bloqueando o event loop — e duas atualizações
+// simultâneas (Promise.all sobre vários ESPs) se sobrescreviam, porque cada uma
+// carregava e salvava a sua própria cópia. Com um único objeto compartilhado o
+// último write não perde mais a alteração do outro dispositivo.
+let cache = null;
+let pendingWrite = false;
+let flushTimer = null;
+
+const WRITE_DEBOUNCE_MS = 1000;
+
 function loadStore() {
+  if (cache) return cache;
+
   ensureDataFile();
   try {
     const raw = fs.readFileSync(DATA_FILE, 'utf-8');
     const parsed = JSON.parse(raw);
 
-    if (!parsed || typeof parsed !== 'object') {
-      return createDefaultStore();
-    }
-
-    return {
-      clients: Array.isArray(parsed.clients) ? parsed.clients : []
-    };
+    cache = (parsed && typeof parsed === 'object')
+      ? { clients: Array.isArray(parsed.clients) ? parsed.clients : [] }
+      : createDefaultStore();
   } catch (_e) {
-    return createDefaultStore();
+    cache = createDefaultStore();
+  }
+
+  return cache;
+}
+
+function writeNow() {
+  if (flushTimer) {
+    clearTimeout(flushTimer);
+    flushTimer = null;
+  }
+  pendingWrite = false;
+  if (!cache) return;
+  fs.writeFileSync(DATA_FILE, JSON.stringify(cache, null, 2), 'utf-8');
+}
+
+// Gravação imediata: ações explícitas do usuário (cadastro/edição de ESP).
+function saveStore(store) {
+  cache = store;
+  writeNow();
+}
+
+// Gravação adiada: estado que muda em alta frequência (cor do LED). Janela
+// máxima de WRITE_DEBOUNCE_MS a partir da primeira alteração.
+function scheduleSave(store) {
+  cache = store;
+  pendingWrite = true;
+  if (!flushTimer) {
+    flushTimer = setTimeout(writeNow, WRITE_DEBOUNCE_MS);
   }
 }
 
-function saveStore(store) {
-  fs.writeFileSync(DATA_FILE, JSON.stringify(store, null, 2), 'utf-8');
+function flushPendingWrites() {
+  if (pendingWrite) writeNow();
 }
+
+// Não perder a última cor se o processo cair no meio da janela de debounce.
+process.on('exit', flushPendingWrites);
+['SIGINT', 'SIGTERM'].forEach((signal) => {
+  process.on(signal, () => {
+    flushPendingWrites();
+    process.exit(0);
+  });
+});
 
 function getClients() {
   const store = loadStore();
@@ -133,9 +180,54 @@ function upsertClient(payload) {
   return store.clients.find((item) => item.espMac === espMac);
 }
 
+// Atualiza só a última cor, sem passar pela validação completa do upsert e
+// sem gravar o arquivo a cada comando. É o caminho quente: durante um arraste
+// no seletor chegam ~7 cores por segundo por dispositivo.
+function setLastLedColor(espMac, color) {
+  const normalized = normalizeMac(espMac);
+  if (!normalized) return null;
+
+  const { r, g, b } = color || {};
+  const valid = [r, g, b].every((value) => Number.isInteger(value) && value >= 0 && value <= 255);
+  if (!valid) return null;
+
+  const store = loadStore();
+  const client = store.clients.find((item) => item.espMac === normalized);
+  if (!client) return null;
+
+  client.lastLedColor = { r, g, b };
+  client.lastPattern = { type: 'solid', color: { r, g, b } };
+  client.updatedAt = new Date().toISOString();
+  scheduleSave(store);
+
+  return client;
+}
+
+// Padrão completo (gradiente/segmentos). `lastLedColor` continua sendo
+// gravado com a cor representativa, para o swatch do dashboard e para ESPs
+// que só entendem cor sólida.
+function setLastPattern(espMac, pattern, representativeColor) {
+  const normalized = normalizeMac(espMac);
+  if (!normalized) return null;
+
+  const store = loadStore();
+  const client = store.clients.find((item) => item.espMac === normalized);
+  if (!client) return null;
+
+  client.lastPattern = pattern;
+  if (representativeColor) client.lastLedColor = representativeColor;
+  client.updatedAt = new Date().toISOString();
+  scheduleSave(store);
+
+  return client;
+}
+
 module.exports = {
   normalizeMac,
   getClients,
   getClientByMac,
-  upsertClient
+  upsertClient,
+  setLastLedColor,
+  setLastPattern,
+  flushPendingWrites
 };

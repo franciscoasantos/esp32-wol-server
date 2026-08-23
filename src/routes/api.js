@@ -3,7 +3,9 @@ const {
   normalizeMac,
   getClients,
   getClientByMac,
-  upsertClient
+  upsertClient,
+  setLastLedColor,
+  setLastPattern
 } = require('../data/clientsStore');
 const { getWolTargets, upsertWolTarget } = require('../data/wolTargetsStore');
 const { getScenes, saveScene, deleteScene } = require('../data/scenesStore');
@@ -158,6 +160,21 @@ function parseWhite(body) {
   return white;
 }
 
+// Duração da transição no firmware. Ausente ou 0 = aplica na hora, que é o
+// que o seletor de cor manda (ele já envia uma cor a cada 140 ms).
+function parseFadeMs(body) {
+  if (!Object.prototype.hasOwnProperty.call(body || {}, 'fadeMs')) {
+    return null;
+  }
+
+  const fadeMs = body?.fadeMs;
+  if (!Number.isInteger(fadeMs) || fadeMs < 0 || fadeMs > 60000) {
+    throw new Error('fadeMs deve ser um inteiro entre 0 e 60000');
+  }
+
+  return fadeMs;
+}
+
 function parseEspTargets(body) {
   const raw = Array.isArray(body?.espMacs)
     ? body.espMacs
@@ -263,6 +280,7 @@ async function handleLED(req, res) {
 
     const color = parseRgb(body);
     const white = parseWhite(body);
+    const fadeMs = parseFadeMs(body);
 
     const results = await Promise.all(targets.map(async (espMac) => {
       const client = getClientByMac(espMac);
@@ -274,6 +292,9 @@ async function handleLED(req, res) {
         const command = { action: 'led', r: color.r, g: color.g, b: color.b };
         if (client.ledType === 'sk6812' && white !== null) {
           command.w = white;
+        }
+        if (fadeMs) {
+          command.fadeMs = fadeMs;
         }
 
         const response = await sendCommandToESP(espMac, command);
@@ -287,7 +308,9 @@ async function handleLED(req, res) {
           g: typeof response?.g === 'number' ? response.g : color.g,
           b: typeof response?.b === 'number' ? response.b : color.b
         };
-        upsertClient({ ...client, lastLedColor: confirmedColor });
+        // Caminho quente: atualiza a cor em memória e grava com debounce, em
+        // vez de reescrever clients.json a cada comando.
+        setLastLedColor(espMac, confirmedColor);
         // Cor sólida interrompe qualquer efeito ativo (espelha o firmware)
         setActiveEffect(espMac, 'none');
         notifyClientState(espMac, { ...confirmedColor, w: response?.w || 0 });
@@ -305,7 +328,163 @@ async function handleLED(req, res) {
   }
 }
 
-const ALLOWED_EFFECTS = new Set(['breathing', 'rainbow', 'fade', 'none']);
+// Cor de um stop/segmento: r/g/b obrigatórios, w opcional.
+function parsePatternColor(entry, label) {
+  const { r, g, b } = entry || {};
+  const valid = [r, g, b].every((value) => Number.isInteger(value) && value >= 0 && value <= 255);
+  if (!valid) {
+    throw new Error(`${label}: r/g/b devem ser inteiros entre 0 e 255`);
+  }
+
+  const color = { r, g, b };
+  if (Object.prototype.hasOwnProperty.call(entry, 'w')) {
+    if (!Number.isInteger(entry.w) || entry.w < 0 || entry.w > 255) {
+      throw new Error(`${label}: w deve ser um inteiro entre 0 e 255`);
+    }
+    color.w = entry.w;
+  }
+  return color;
+}
+
+const MAX_STOPS = 8;
+const MAX_SEGMENTS = 8;
+
+// Gradiente por stops (pos 0-255). O firmware interpola, então o payload não
+// cresce com o tamanho da fita — importante para os 589 LEDs da sala.
+function parseStops(body) {
+  const stops = body?.stops;
+  if (!Array.isArray(stops) || stops.length < 2) {
+    throw new Error('stops deve ser um array com pelo menos 2 itens');
+  }
+  if (stops.length > MAX_STOPS) {
+    throw new Error(`stops aceita no máximo ${MAX_STOPS} itens`);
+  }
+
+  let previous = -1;
+  return stops.map((stop, index) => {
+    const pos = stop?.pos;
+    if (!Number.isInteger(pos) || pos < 0 || pos > 255) {
+      throw new Error(`stop ${index}: pos deve ser um inteiro entre 0 e 255`);
+    }
+    if (pos < previous) {
+      throw new Error('stops devem vir em ordem crescente de pos');
+    }
+    previous = pos;
+    return { pos, ...parsePatternColor(stop, `stop ${index}`) };
+  });
+}
+
+// Trechos da fita com cores próprias; pixel fora de todos fica apagado.
+function parseSegments(body, ledCount) {
+  const segments = body?.segments;
+  if (!Array.isArray(segments) || segments.length === 0) {
+    throw new Error('segments deve ser um array com pelo menos 1 item');
+  }
+  if (segments.length > MAX_SEGMENTS) {
+    throw new Error(`segments aceita no máximo ${MAX_SEGMENTS} itens`);
+  }
+
+  return segments.map((segment, index) => {
+    const { from, to } = segment || {};
+    if (!Number.isInteger(from) || !Number.isInteger(to) || from < 0 || to < from) {
+      throw new Error(`segmento ${index}: from/to inválidos`);
+    }
+    return { from, to, ...parsePatternColor(segment, `segmento ${index}`) };
+  });
+}
+
+function assertSegmentsFit(segments, ledCount) {
+  if (!Number.isInteger(ledCount)) return;
+  segments.forEach((segment, index) => {
+    if (segment.to >= ledCount) {
+      throw new Error(`segmento ${index}: to (${segment.to}) fora da fita de ${ledCount} LEDs`);
+    }
+  });
+}
+
+// Envia um padrão estático (gradiente ou segmentos). Como a cor sólida, ele
+// interrompe qualquer efeito ativo no dispositivo.
+async function sendPattern(req, res, action, parsePayload, buildCommand) {
+  try {
+    const body = await parseJsonBody(req);
+    const targets = parseEspTargets(body);
+    const fadeMs = parseFadeMs(body);
+    // Validação do payload acontece uma vez, fora do laço: erro de formato é
+    // 422 da requisição inteira, não uma falha por dispositivo.
+    const parsed = parsePayload(body);
+
+    const results = await Promise.all(targets.map(async (espMac) => {
+      const client = getClientByMac(espMac);
+      if (!client) {
+        return { espMac, ok: false, error: 'Cliente não encontrado' };
+      }
+
+      try {
+        const { command, pattern, representative } = buildCommand(parsed, client);
+        if (fadeMs) command.fadeMs = fadeMs;
+
+        const response = await sendCommandToESP(espMac, command);
+        if (response?.status === 'error') {
+          return { espMac, ok: false, error: response.error || 'Falha na comunicação com ESP' };
+        }
+
+        setLastPattern(espMac, pattern, representative);
+        setActiveEffect(espMac, 'none');
+        notifyClientState(espMac, { ...representative, w: representative.w || 0 });
+
+        return { espMac, ok: true, response };
+      } catch (error) {
+        return { espMac, ok: false, error: error.message };
+      }
+    }));
+
+    return sendJson(res, 200, buildResultSummary(action, results));
+  } catch (error) {
+    const status = error.message === 'Invalid JSON' ? 400 : 422;
+    return sendJson(res, status, { error: error.message });
+  }
+}
+
+function handleGradient(req, res) {
+  return sendPattern(req, res, 'gradient', parseStops, (stops) => ({
+    command: { action: 'gradient', stops },
+    pattern: { type: 'gradient', stops },
+    representative: { r: stops[0].r, g: stops[0].g, b: stops[0].b }
+  }));
+}
+
+function handleSegments(req, res) {
+  // O formato é validado uma vez; o limite de índice depende do ledCount de
+  // cada ESP, então esse fica no laço e vira erro daquele dispositivo.
+  return sendPattern(req, res, 'segments', (body) => parseSegments(body, null), (segments, client) => {
+    assertSegmentsFit(segments, client.ledCount);
+    return {
+      command: { action: 'segments', segments },
+      pattern: { type: 'segments', segments },
+      representative: { r: segments[0].r, g: segments[0].g, b: segments[0].b }
+    };
+  });
+}
+// Os efeitos rodam no firmware; esta lista tem que acompanhar o enum de
+// led_controller.h e o dispatch em ws_protocol_commands.c.
+const ALLOWED_EFFECTS = new Set([
+  'breathing', 'rainbow', 'fade', 'fire', 'comet', 'twinkle', 'wave', 'wipe', 'none'
+]);
+
+// Parâmetro 0-100 opcional. Ausente = o firmware usa o padrão do efeito,
+// que varia (profundidade no breathing, densidade no twinkle, etc).
+function parseEffectParam(body, key) {
+  if (!Object.prototype.hasOwnProperty.call(body || {}, key)) {
+    return null;
+  }
+
+  const value = body?.[key];
+  if (!Number.isInteger(value) || value < 0 || value > 100) {
+    throw new Error(`${key} deve ser um inteiro entre 0 e 100`);
+  }
+
+  return value;
+}
 
 // Envia UM único comando de efeito ao ESP. A animação roda no firmware;
 // o servidor não fica mandando frames. effect 'none' interrompe o efeito.
@@ -325,6 +504,9 @@ async function handleEffect(req, res) {
       color = parseRgb(body);
     }
 
+    const speed = parseEffectParam(body, 'speed');
+    const intensity = parseEffectParam(body, 'intensity');
+
     const results = await Promise.all(targets.map(async (espMac) => {
       const client = getClientByMac(espMac);
       if (!client) {
@@ -334,6 +516,8 @@ async function handleEffect(req, res) {
       try {
         const command = { action: 'effect', effect };
         if (color) { command.r = color.r; command.g = color.g; command.b = color.b; }
+        if (speed !== null) { command.speed = speed; }
+        if (intensity !== null) { command.intensity = intensity; }
 
         const response = await sendCommandToESP(espMac, command);
         if (response?.status === 'error') {
@@ -365,6 +549,8 @@ module.exports = {
   handleWOL,
   handleLED,
   handleEffect,
+  handleGradient,
+  handleSegments,
   handleGetScenes,
   handleSaveScene,
   handleDeleteScene

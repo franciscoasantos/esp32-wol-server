@@ -121,7 +121,10 @@ function handleGetConfig(ws, espMac) {
     ledCount: clientConfig.ledCount,
     ledPin: clientConfig.ledPin,
     ledType,
-    ...(clientConfig.lastLedColor ? { lastLedColor: clientConfig.lastLedColor } : {})
+    ...(clientConfig.lastLedColor ? { lastLedColor: clientConfig.lastLedColor } : {}),
+    // Sem isto, reconectar com um gradiente na fita jogaria uma cor sólida
+    // por cima do que o firmware acabou de restaurar da NVS.
+    ...(clientConfig.lastPattern ? { lastPattern: clientConfig.lastPattern } : {})
   };
   logger.debug(`[WS TX][${espMac}] ${formatWsPayload(configRes)}`);
   ws.send(JSON.stringify(configRes));

@@ -14,6 +14,8 @@ const {
   handleWOL,
   handleLED,
   handleEffect,
+  handleGradient,
+  handleSegments,
   handleGetScenes,
   handleSaveScene,
   handleDeleteScene
@@ -21,7 +23,7 @@ const {
 const { handleStatic } = require('./utils/static');
 const { initializeTunnel, onStatusChange, onStateChange } = require('./websocket/espTunnel');
 const { notifyClients, notifyClientState } = require('./utils/sse');
-const { getClientByMac, upsertClient } = require('./data/clientsStore');
+const { setLastLedColor } = require('./data/clientsStore');
 
 // Initialize WebSocket tunnel
 initializeTunnel();
@@ -33,10 +35,7 @@ onStatusChange((connectedClients) => {
 
 // Listen to ESP state reports and propagate to browsers + persist
 onStateChange((espMac, color) => {
-  const client = getClientByMac(espMac);
-  if (client) {
-    upsertClient({ ...client, lastLedColor: { r: color.r, g: color.g, b: color.b } });
-  }
+  setLastLedColor(espMac, { r: color.r, g: color.g, b: color.b });
   notifyClientState(espMac, color);
 });
 
@@ -130,6 +129,15 @@ const httpServer = http.createServer((req, res) => {
   // EFFECT COMMAND (efeito roda no firmware do ESP)
   if (req.url === "/effect" && req.method === "POST") {
     return handleEffect(req, res);
+  }
+
+  // PATTERN COMMANDS (gradiente e segmentos; ambos interrompem efeito ativo)
+  if (req.url === "/gradient" && req.method === "POST") {
+    return handleGradient(req, res);
+  }
+
+  if (req.url === "/segments" && req.method === "POST") {
+    return handleSegments(req, res);
   }
 
   // SCENES API

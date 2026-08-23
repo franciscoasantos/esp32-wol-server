@@ -11,7 +11,7 @@ const state = {
   clients: [],                 // [{ espMac, nickname, ledCount, ledPin, ledType, lastLedColor, connected, activeEffect }]
   connected: new Set(),        // macs online (via SSE)
   liveColors: new Map(),       // mac -> { r, g, b, w }
-  effects: new Map(),          // mac -> 'breathing' | 'rainbow' | 'fade' (efeito ativo)
+  effects: new Map(),          // mac -> nome do efeito ativo (ver EFFECTS em views/led.js)
   selection: new Set(),        // macs selecionados (persistido)
   sseReady: false
 };

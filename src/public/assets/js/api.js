@@ -43,8 +43,14 @@ export const api = {
   deleteScene: (id) => req('DELETE', `/api/scenes/${encodeURIComponent(id)}`),
 
   // Commands (retornam { status, action, okCount, failCount, results })
+  // fadeMs opcional: o firmware interpola até a cor nova. O seletor ao vivo
+  // omite (aplica na hora); cenas mandam algo em torno de 600 ms.
   sendLed: (payload) => req('POST', '/led', payload),
   sendWol: (payload) => req('POST', '/wol', payload),
   // Efeito roda no firmware do ESP; envia um único comando (effect:'none' para parar)
-  sendEffect: (payload) => req('POST', '/effect', payload)
+  sendEffect: (payload) => req('POST', '/effect', payload),
+  // Padrões estáticos: o firmware interpola/preenche, então o payload é
+  // pequeno mesmo numa fita de 589 LEDs.
+  sendGradient: (payload) => req('POST', '/gradient', payload),
+  sendSegments: (payload) => req('POST', '/segments', payload),
 };

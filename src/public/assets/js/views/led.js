@@ -1,10 +1,11 @@
-// Controle de LED simplificado: cor + brilho (principal), branco (sk6812),
-// efeitos e cenas/favoritos. Atua sobre a seleção global de dispositivos.
+// Controle de LED: cor, branco (sk6812), efeitos e cenas/favoritos.
+// Atua sobre a seleção global de dispositivos.
 
 import { store } from '../store.js';
 import { api } from '../api.js';
 import { icon, escapeHtml, toast, openModal, confirmModal, node } from '../ui.js';
 import { createColorControl, toHex } from '../components/colorControl.js';
+import { createGradientEditor } from '../components/gradientEditor.js';
 import { sceneCard } from '../components/sceneCard.js';
 import { showResult } from '../components/resultToast.js';
 
@@ -15,11 +16,35 @@ function mixRgb(a, b, f) {
   return { r: Math.round(a.r + (b.r - a.r) * f), g: Math.round(a.g + (b.g - a.g) * f), b: Math.round(a.b + (b.b - a.b) * f) };
 }
 
+// Transição ao aplicar uma cena. O seletor ao vivo não usa fade: ele já manda
+// uma cor a cada 140 ms e um crossfade longo faria o arraste parecer atrasado.
+const SCENE_FADE_MS = 600;
+
+// Gradiente é um padrão estático: vale um fade mais longo ao aplicar.
+const GRADIENT_FADE_MS = 800;
+
+// Todos rodam no firmware. `usesColor` diz se o efeito parte da cor
+// escolhida no seletor — fogo, arco-íris e transição têm paleta própria.
 const EFFECTS = [
-  { key: 'breathing', label: 'Respiração', desc: 'Pulsa o brilho suavemente' },
-  { key: 'rainbow', label: 'Arco-íris', desc: 'Percorre todas as cores' },
-  { key: 'fade', label: 'Transição', desc: 'Alterna entre cores' }
+  { key: 'breathing', label: 'Respiração', desc: 'Pulsa o brilho suavemente', usesColor: true },
+  { key: 'rainbow', label: 'Arco-íris', desc: 'Percorre todas as cores', usesColor: false },
+  { key: 'fade', label: 'Transição', desc: 'Alterna entre cores', usesColor: false },
+  { key: 'fire', label: 'Fogo', desc: 'Chama subindo pela fita', usesColor: false },
+  { key: 'comet', label: 'Cometa', desc: 'Cabeça com cauda deslizando', usesColor: true },
+  { key: 'twinkle', label: 'Estrelas', desc: 'Pontos piscando ao acaso', usesColor: true },
+  { key: 'wave', label: 'Onda', desc: 'Cristas indo e voltando', usesColor: true },
+  { key: 'wipe', label: 'Preenchimento', desc: 'Preenche e recomeça', usesColor: true }
 ];
+
+// Significado da intensidade muda por efeito; o rótulo acompanha.
+const INTENSITY_LABELS = {
+  breathing: 'Profundidade',
+  fire: 'Altura da chama',
+  comet: 'Tamanho da cauda',
+  twinkle: 'Densidade',
+  wave: 'Número de cristas',
+  wipe: 'Suavidade da borda'
+};
 
 export async function mount(view) {
   view.innerHTML = `
@@ -39,14 +64,37 @@ export async function mount(view) {
         <section class="card p-5">
           <h2 class="mb-1 text-sm font-semibold">Efeitos</h2>
           <p class="mb-4 text-xs muted">Rodam no próprio ESP32 — o servidor envia só um comando.</p>
-          <div class="grid gap-2 sm:grid-cols-3" data-effects>
+          <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-4" data-effects>
             ${EFFECTS.map((e) => `
               <button data-effect="${e.key}" class="surface flex flex-col items-start gap-1 p-3 text-left transition hover:border-indigo-400">
                 <span class="text-sm font-medium">${e.label}</span>
                 <span class="text-xs muted">${e.desc}</span>
               </button>`).join('')}
           </div>
+          <div data-params class="mt-4 hidden grid gap-3 sm:grid-cols-2">
+            <div>
+              <div class="flex items-center justify-between text-sm">
+                <span class="muted">Velocidade</span>
+                <span data-speed-val class="font-medium tabular-nums">50</span>
+              </div>
+              <input data-speed type="range" min="0" max="100" value="50" class="mt-1 w-full accent-indigo-500" />
+            </div>
+            <div>
+              <div class="flex items-center justify-between text-sm">
+                <span data-intensity-label class="muted">Intensidade</span>
+                <span data-intensity-val class="font-medium tabular-nums">50</span>
+              </div>
+              <input data-intensity type="range" min="0" max="100" value="50" class="mt-1 w-full accent-indigo-500" />
+            </div>
+          </div>
           <button data-stop class="btn-ghost mt-3 hidden w-full">${icon('x', 'h-4 w-4')} Parar efeito</button>
+        </section>
+
+        <section class="card p-5">
+          <h2 class="mb-1 text-sm font-semibold">Gradiente</h2>
+          <p class="mb-4 text-xs muted">O ESP interpola entre as cores ao longo da fita.</p>
+          <div data-gradient></div>
+          <button data-apply-gradient class="btn-primary mt-4 w-full">Aplicar gradiente</button>
         </section>
       </div>
 
@@ -65,14 +113,24 @@ export async function mount(view) {
   const favoritesEl = view.querySelector('[data-favorites]');
   const scenesEl = view.querySelector('[data-scenes]');
   const stopBtn = view.querySelector('[data-stop]');
+  const paramsEl = view.querySelector('[data-params]');
+  const speedInput = view.querySelector('[data-speed]');
+  const speedVal = view.querySelector('[data-speed-val]');
+  const intensityInput = view.querySelector('[data-intensity]');
+  const intensityVal = view.querySelector('[data-intensity-val]');
+  const intensityLabel = view.querySelector('[data-intensity-label]');
+  const gradientMount = view.querySelector('[data-gradient]');
 
   let applyTimer = null;
+  let effectTimer = null;
   let effectKey = null;
 
   const control = createColorControl(colorMount, {
     hasWhite: false,
     onChange: (color) => { if (effectKey) clearEffect(); renderPalette(); scheduleApply(color); }
   });
+
+  const gradient = createGradientEditor(gradientMount);
 
   function selectedOnline() {
     return store.selectedMacs().filter((m) => store.isConnected(m));
@@ -101,20 +159,11 @@ export async function mount(view) {
     const macs = store.selectedMacs();
     if (!macs.length) return;
     clearTimeout(applyTimer);
+    clearTimeout(effectTimer);
     applyTimer = setTimeout(async () => {
       try { await api.sendLed({ espMacs: macs, ...color }); }
       catch (e) { toast('error', e.message); }
     }, 140);
-  }
-
-  async function applyNow(color) {
-    const macs = store.selectedMacs();
-    if (!macs.length) { toast('info', 'Selecione um dispositivo'); return; }
-    try {
-      const res = await api.sendLed({ espMacs: macs, ...color });
-      const byMac = Object.fromEntries(store.clients.map((c) => [c.espMac, c]));
-      showResult(res, { actionLabel: 'Cor aplicada', clientsByMac: byMac });
-    } catch (e) { toast('error', e.message); }
   }
 
   /* ------------------------------ paleta ---------------------------- */
@@ -171,6 +220,10 @@ export async function mount(view) {
       b.classList.toggle('bg-indigo-500/10', active);
     });
     stopBtn.classList.toggle('hidden', !effectKey);
+    paramsEl.classList.toggle('hidden', !effectKey);
+    if (effectKey) {
+      intensityLabel.textContent = INTENSITY_LABELS[effectKey] || 'Intensidade';
+    }
   }
 
   // Limpa só o destaque local (sem rede). Usado quando uma cor sólida assume
@@ -189,7 +242,13 @@ export async function mount(view) {
     const c = control.getColor();
     const label = (EFFECTS.find((e) => e.key === key) || {}).label || 'Efeito';
     try {
-      const res = await api.sendEffect({ espMacs: macs, effect: key, r: c.r, g: c.g, b: c.b });
+      const res = await api.sendEffect({
+        espMacs: macs,
+        effect: key,
+        r: c.r, g: c.g, b: c.b,
+        speed: Number(speedInput.value),
+        intensity: Number(intensityInput.value)
+      });
       const byMac = Object.fromEntries(store.clients.map((x) => [x.espMac, x]));
       showResult(res, { actionLabel: label, clientsByMac: byMac });
     } catch (e) {
@@ -207,6 +266,48 @@ export async function mount(view) {
     try { await api.sendEffect({ espMacs: macs, effect: 'none' }); }
     catch (e) { toast('error', e.message); }
   }
+
+  // Mexer num slider com efeito ativo reenvia o comando (um só, com
+  // debounce) — a animação segue rodando no ESP com os novos parâmetros.
+  function scheduleEffectParams() {
+    if (!effectKey) return;
+    const macs = selectedOnline();
+    if (!macs.length) return;
+    const c = control.getColor();
+    clearTimeout(effectTimer);
+    effectTimer = setTimeout(async () => {
+      try {
+        await api.sendEffect({
+          espMacs: macs,
+          effect: effectKey,
+          r: c.r, g: c.g, b: c.b,
+          speed: Number(speedInput.value),
+          intensity: Number(intensityInput.value)
+        });
+      } catch (e) { toast('error', e.message); }
+    }, 200);
+  }
+
+  speedInput.addEventListener('input', () => {
+    speedVal.textContent = speedInput.value;
+    scheduleEffectParams();
+  });
+  intensityInput.addEventListener('input', () => {
+    intensityVal.textContent = intensityInput.value;
+    scheduleEffectParams();
+  });
+
+  view.querySelector('[data-apply-gradient]').onclick = async () => {
+    const macs = selectedOnline();
+    if (!macs.length) { toast('info', 'Nenhum dispositivo online selecionado'); return; }
+    clearEffect();
+    const stops = gradient.getStops();
+    try {
+      const res = await api.sendGradient({ espMacs: macs, stops, fadeMs: GRADIENT_FADE_MS });
+      const byMac = Object.fromEntries(store.clients.map((c) => [c.espMac, c]));
+      showResult(res, { actionLabel: 'Gradiente', clientsByMac: byMac });
+    } catch (e) { toast('error', e.message); }
+  };
 
   view.querySelectorAll('[data-effect]').forEach((b) => { b.onclick = () => startEffect(b.dataset.effect); });
   stopBtn.onclick = stopEffect;
@@ -231,7 +332,7 @@ export async function mount(view) {
           const macs = (s.espMacs && s.espMacs.length) ? s.espMacs : store.selectedMacs();
           if (!macs.length) { toast('info', 'Selecione um dispositivo'); return; }
           try {
-            const res = await api.sendLed({ espMacs: macs, ...s.color });
+            const res = await api.sendLed({ espMacs: macs, ...s.color, fadeMs: SCENE_FADE_MS });
             showResult(res, { actionLabel: `Cena “${s.name}”`, clientsByMac: byMac });
           } catch (e) { toast('error', e.message); }
         },
@@ -278,26 +379,49 @@ export async function mount(view) {
   };
 
   /* ------------------------------ init ------------------------------ */
-  await store.refreshClients().catch(() => {});
-  // pré-carrega a cor do primeiro selecionado, se houver
-  const firstSel = store.selectedClients()[0];
-  if (firstSel) {
-    const col = store.colorOf(firstSel.espMac);
+  // Reidrata o controle a partir do estado central (cor e efeito ativo do
+  // primeiro selecionado). Sem isto, voltar para /led com um efeito rodando
+  // mostrava todos os botões apagados, embora o dashboard mostrasse certo.
+  function hydrateFromStore() {
+    const first = store.selectedClients()[0];
+    if (!first) { effectKey = null; setEffectUI(); return; }
+    const col = store.colorOf(first.espMac);
     if (col) control.setColor(col);
+    effectKey = store.effectOf(first.espMac);
+    setEffectUI();
+    renderPalette();
+
+    // Reidrata o editor de gradiente quando o dispositivo está mostrando um.
+    const pattern = first.lastPattern;
+    if (pattern?.type === 'gradient' && Array.isArray(pattern.stops)) gradient.setStops(pattern.stops);
   }
+
+  function isFirstSelected(espMac) {
+    const first = store.selectedClients()[0];
+    return !!first && first.espMac === espMac;
+  }
+
+  await store.refreshClients().catch(() => {});
   refreshGuard();
+  hydrateFromStore();
   renderPalette();
   loadScenes();
 
   const offs = [
-    store.on('selection', refreshGuard),
+    store.on('selection', () => { refreshGuard(); hydrateFromStore(); }),
     store.on('clients', () => { refreshGuard(); loadScenes(); }),
-    store.on('status', refreshGuard)
+    store.on('status', refreshGuard),
+    store.on('effect', ({ espMac }) => {
+      if (!isFirstSelected(espMac)) return;
+      effectKey = store.effectOf(espMac);
+      setEffectUI();
+    })
   ];
 
   return () => {
     offs.forEach((off) => off());
     clearTimeout(applyTimer);
+    clearTimeout(effectTimer);
     // Não interrompe o efeito ao sair da tela — ele continua rodando no ESP.
     clearEffect();
     control.destroy();
