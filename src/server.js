@@ -25,7 +25,13 @@ const {
   handleDeleteSchedule,
   handleRunSchedule,
   handleNotify,
-  handleWakeRitual
+  handleWakeRitual,
+  handleApplyScene,
+  handleCaptureScene,
+  handleRenameScene,
+  handleReorderScenes,
+  handleGetAway,
+  handleSaveAway
 } = require('./routes/api');
 const { handleStatic } = require('./utils/static');
 const { initializeTunnel, onStatusChange, onStateChange } = require('./websocket/espTunnel');
@@ -160,6 +166,24 @@ const httpServer = http.createServer((req, res) => {
     return handleSaveScene(req, res);
   }
 
+  if (req.url === "/api/scenes/capture" && req.method === "POST") {
+    return handleCaptureScene(req, res);
+  }
+
+  if (req.url === "/api/scenes/reorder" && req.method === "POST") {
+    return handleReorderScenes(req, res);
+  }
+
+  if (req.url.startsWith("/api/scenes/") && req.url.endsWith("/apply") && req.method === "POST") {
+    const sceneId = req.url.slice("/api/scenes/".length, -"/apply".length);
+    return handleApplyScene(req, res, sceneId);
+  }
+
+  if (req.url.startsWith("/api/scenes/") && req.url.endsWith("/rename") && req.method === "POST") {
+    const sceneId = req.url.slice("/api/scenes/".length, -"/rename".length);
+    return handleRenameScene(req, res, sceneId);
+  }
+
   if (req.url.startsWith("/api/scenes/") && req.method === "DELETE") {
     const sceneId = req.url.slice("/api/scenes/".length);
     return handleDeleteScene(req, res, sceneId);
@@ -187,6 +211,14 @@ const httpServer = http.createServer((req, res) => {
   if (req.url.startsWith("/api/schedules/") && req.method === "DELETE") {
     const scheduleId = req.url.slice("/api/schedules/".length);
     return handleDeleteSchedule(req, res, scheduleId);
+  }
+
+  if (req.url === "/api/away" && req.method === "GET") {
+    return handleGetAway(req, res);
+  }
+
+  if (req.url === "/api/away" && req.method === "POST") {
+    return handleSaveAway(req, res);
   }
 
   if (req.url === "/api/notify" && req.method === "POST") {

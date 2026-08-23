@@ -123,7 +123,10 @@ export const store = {
         const color = { r: d.r | 0, g: d.g | 0, b: d.b | 0, w: d.w | 0 };
         state.liveColors.set(d.espMac, color);
         const c = state.clients.find((x) => x.espMac === d.espMac);
-        if (c) c.lastLedColor = { r: color.r, g: color.g, b: color.b };
+        if (c) {
+          c.lastLedColor = { r: color.r, g: color.g, b: color.b };
+          if (d.pattern) c.lastPattern = d.pattern;
+        }
         emit('state', { espMac: d.espMac, color });
       } catch (e) {}
     });

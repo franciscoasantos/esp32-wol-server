@@ -10,18 +10,37 @@ const { notifyClientState, notifyClientEffect } = require('../utils/sse');
 
 // Efeito ativo por dispositivo (em memória). O ESP roda o efeito no firmware e
 // não reporta estado de volta, então o servidor é a fonte da verdade aqui.
-const activeEffects = new Map(); // espMac -> 'breathing' | 'fire' | ...
+//
+// Guarda também cor base e parâmetros: sem eles, capturar uma cena com um
+// fogo em intensidade 70 e reaplicá-la traria o fogo no padrão.
+const activeEffects = new Map(); // espMac -> { effect, color, speed, intensity }
 
-function setActiveEffect(espMac, effect) {
-  if (!effect || effect === 'none') {
+function setActiveEffect(espMac, effect, details = {}) {
+  const next = (!effect || effect === 'none') ? null : effect;
+  const previous = activeEffects.get(espMac)?.effect || null;
+
+  if (next === null) {
     activeEffects.delete(espMac);
   } else {
-    activeEffects.set(espMac, effect);
+    activeEffects.set(espMac, { effect: next, ...details });
   }
-  notifyClientEffect(espMac, effect && effect !== 'none' ? effect : null);
+
+  // Só notifica quando o efeito realmente muda. Toda cor sólida passa por aqui
+  // para interromper efeito, e um arraste no seletor manda ~7 cores por
+  // segundo — sem esta guarda, viravam 7 eventos SSE/s re-renderizando a barra
+  // de dispositivos e o dashboard em todos os navegadores abertos.
+  if (previous !== next) {
+    notifyClientEffect(espMac, next);
+  }
 }
 
+// Só o nome — é o que a API e o SSE expõem.
 function getActiveEffect(espMac) {
+  return activeEffects.get(espMac)?.effect || null;
+}
+
+// Estado completo, para quem precisa reproduzir o efeito depois (cenas).
+function getActiveEffectState(espMac) {
   return activeEffects.get(espMac) || null;
 }
 
@@ -76,7 +95,7 @@ function applyColor(espMacs, { r, g, b, w = null, fadeMs = null }) {
     };
     setLastLedColor(espMac, confirmed);
     setActiveEffect(espMac, 'none'); // cor sólida interrompe efeito (espelha o firmware)
-    notifyClientState(espMac, { ...confirmed, w: response?.w || 0 });
+    notifyClientState(espMac, { ...confirmed, w: response?.w || 0 }, { type: 'solid', color: confirmed });
 
     return { espMac, ok: true, response };
   });
@@ -96,7 +115,7 @@ function applyPattern(espMacs, action, build, fadeMs = null) {
 
     setLastPattern(espMac, pattern, representative);
     setActiveEffect(espMac, 'none');
-    notifyClientState(espMac, { ...representative, w: representative.w || 0 });
+    notifyClientState(espMac, { ...representative, w: representative.w || 0 }, pattern);
 
     return { espMac, ok: true, response };
   });
@@ -115,7 +134,7 @@ function applyEffect(espMacs, { effect, color = null, speed = null, intensity = 
       return { espMac, ok: false, error: response.error || 'Falha na comunicação com ESP' };
     }
 
-    setActiveEffect(espMac, effect);
+    setActiveEffect(espMac, effect, { color, speed, intensity });
     return { espMac, ok: true, response };
   });
 }
@@ -186,6 +205,7 @@ async function restore(state, { fadeMs = 400 } = {}) {
 module.exports = {
   setActiveEffect,
   getActiveEffect,
+  getActiveEffectState,
   buildResultSummary,
   applyColor,
   applyPattern,

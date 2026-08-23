@@ -15,8 +15,14 @@ function notifyClients(data) {
   });
 }
 
-function notifyClientState(espMac, color) {
-  const payload = JSON.stringify({ espMac, r: color.r, g: color.g, b: color.b, w: color.w || 0 });
+// O padrão vai junto da cor: o card do dashboard mostra a fita inteira, e só
+// com a cor representativa um gradiente apareceria como cor sólida.
+function notifyClientState(espMac, color, pattern) {
+  const payload = JSON.stringify({
+    espMac,
+    r: color.r, g: color.g, b: color.b, w: color.w || 0,
+    ...(pattern ? { pattern } : {})
+  });
   sseClients.forEach((client) => {
     client.write(`event: state\ndata: ${payload}\n\n`);
   });

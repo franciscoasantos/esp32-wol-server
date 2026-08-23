@@ -1,7 +1,14 @@
 const { appShell } = require('../views');
 const { normalizeMac, getClients, upsertClient } = require('../data/clientsStore');
 const { getWolTargets, upsertWolTarget } = require('../data/wolTargetsStore');
-const { getScenes, saveScene, deleteScene } = require('../data/scenesStore');
+const {
+  getScenes,
+  getSceneById,
+  saveScene,
+  renameScene,
+  reorderScenes,
+  deleteScene
+} = require('../data/scenesStore');
 const {
   isESPConnected,
   getConnectedClients,
@@ -15,6 +22,9 @@ const {
   sendWol
 } = require('../services/ledService');
 const { addClient, removeClient } = require('../utils/sse');
+const { saveConfig: saveAwayConfig } = require('../data/awayStore');
+const awayMode = require('../services/awayMode');
+const { applyScene, captureDevices } = require('../services/sceneService');
 const wakeRitual = require('../services/wakeRitual');
 const { pulse } = require('../services/notify');
 const { getSchedules, upsertSchedule, deleteSchedule } = require('../data/schedulesStore');
@@ -519,6 +529,77 @@ async function handleWakeRitual(req, res) {
   }
 }
 
+/* ------------------------------ CENAS ------------------------------ */
+
+// Aplicar virou trabalho do servidor: cada dispositivo da cena pode estar
+// num modo diferente, e o cliente teria que orquestrar comando a comando.
+async function handleApplyScene(req, res, id) {
+  const scene = getSceneById(id);
+  if (!scene) {
+    return sendJson(res, 404, { error: 'Cena não encontrada' });
+  }
+
+  try {
+    return sendJson(res, 200, await applyScene(scene));
+  } catch (error) {
+    return sendJson(res, 500, { error: error.message });
+  }
+}
+
+// Fotografa o estado atual dos dispositivos e salva como cena.
+async function handleCaptureScene(req, res) {
+  try {
+    const body = await parseJsonBody(req);
+    const targets = parseEspTargets(body);
+    const name = typeof body?.name === 'string' ? body.name.trim() : '';
+
+    const scene = saveScene({ name, devices: captureDevices(targets) });
+    return sendJson(res, 200, { scene });
+  } catch (error) {
+    const status = error.message === 'Invalid JSON' ? 400 : 422;
+    return sendJson(res, status, { error: error.message });
+  }
+}
+
+async function handleRenameScene(req, res, id) {
+  try {
+    const body = await parseJsonBody(req);
+    return sendJson(res, 200, { scene: renameScene(id, body?.name) });
+  } catch (error) {
+    const status = error.message === 'Cena não encontrada' ? 404 : 422;
+    return sendJson(res, status, { error: error.message });
+  }
+}
+
+async function handleReorderScenes(req, res) {
+  try {
+    const body = await parseJsonBody(req);
+    return sendJson(res, 200, { scenes: reorderScenes(body?.ids) });
+  } catch (error) {
+    const status = error.message === 'Invalid JSON' ? 400 : 422;
+    return sendJson(res, status, { error: error.message });
+  }
+}
+
+/* --------------------------- MODO AUSENTE --------------------------- */
+
+function handleGetAway(_req, res) {
+  return sendJson(res, 200, { away: awayMode.describe() });
+}
+
+async function handleSaveAway(req, res) {
+  try {
+    const body = await parseJsonBody(req);
+    const saved = saveAwayConfig(body);
+    // A máquina de estados guarda dispositivos e horários da configuração
+    // anterior; sem zerar, um ESP removido continuaria sendo comandado.
+    awayMode.reset();
+    return sendJson(res, 200, { away: { ...saved, devices: [] } });
+  } catch (error) {
+    const status = error.message === 'Invalid JSON' ? 400 : 422;
+    return sendJson(res, status, { error: error.message });
+  }
+}
 module.exports = {
   handleAppShell,
   handleStatus,
@@ -541,5 +622,11 @@ module.exports = {
   handleDeleteSchedule,
   handleRunSchedule,
   handleNotify,
-  handleWakeRitual
+  handleWakeRitual,
+  handleApplyScene,
+  handleCaptureScene,
+  handleRenameScene,
+  handleReorderScenes,
+  handleGetAway,
+  handleSaveAway
 };

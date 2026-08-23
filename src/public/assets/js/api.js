@@ -39,7 +39,12 @@ export const api = {
 
   // Scenes
   getScenes: () => req('GET', '/api/scenes').then((d) => d.scenes || []),
+  // Uma cena guarda um estado por dispositivo; quem aplica e captura é o servidor.
   saveScene: (payload) => req('POST', '/api/scenes', payload).then((d) => d.scene),
+  captureScene: (payload) => req('POST', '/api/scenes/capture', payload).then((d) => d.scene),
+  applyScene: (id) => req('POST', `/api/scenes/${encodeURIComponent(id)}/apply`),
+  renameScene: (id, name) => req('POST', `/api/scenes/${encodeURIComponent(id)}/rename`, { name }),
+  reorderScenes: (ids) => req('POST', '/api/scenes/reorder', { ids }).then((d) => d.scenes || []),
   deleteScene: (id) => req('DELETE', `/api/scenes/${encodeURIComponent(id)}`),
 
   // Commands (retornam { status, action, okCount, failCount, results })
@@ -62,6 +67,9 @@ export const api = {
   notify: (payload) => req('POST', '/api/notify', payload),
   // WoL com a fita como barra de progresso enquanto sonda o alvo
   wakeRitual: (payload) => req('POST', '/wol/ritual', payload),
+  // Modo ausente
+  getAway: () => req('GET', '/api/away').then((d) => d.away),
+  saveAway: (payload) => req('POST', '/api/away', payload).then((d) => d.away),
   sendGradient: (payload) => req('POST', '/gradient', payload),
   sendSegments: (payload) => req('POST', '/segments', payload),
 };

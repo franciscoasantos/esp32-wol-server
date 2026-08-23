@@ -11,6 +11,7 @@ const { LATITUDE, LONGITUDE } = require('../config');
 const { solarEventMinutes } = require('../utils/solar');
 const { applyColor, applyEffect, applyPattern } = require('./ledService');
 const sunrise = require('./sunrise');
+const awayMode = require('./awayMode');
 
 const TICK_MS = 30000;
 // Janela de tolerância: com tick de 30 s, um horário pode ser observado com
@@ -82,6 +83,11 @@ async function runAction(schedule) {
 
 async function tick() {
   const now = new Date();
+
+  // Modo ausente compartilha o mesmo tick: é máquina de estados, não
+  // agendamento, mas 30 s de granularidade servem para os dois.
+  await awayMode.tick(now).catch((error) => logger.error(`Modo ausente falhou: ${error.message}`));
+
   const today = dateKey(now);
   const nowMinutes = minutesOfDay(now);
   const weekday = now.getDay();

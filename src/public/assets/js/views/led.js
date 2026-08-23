@@ -322,60 +322,102 @@ export async function mount(view) {
       scenesEl.innerHTML = `<p class="py-6 text-center text-sm muted">Nenhuma cena salva ainda.<br/>Ajuste a cor e toque em “Salvar atual”.</p>`;
       return;
     }
-    scenes.forEach((scene) => {
+    scenes.forEach((scene, index) => {
       scenesEl.appendChild(sceneCard(scene, {
         clientsByMac: byMac,
-        onApply: async (s) => {
-          clearEffect();
-          control.setColor(s.color);
-          renderPalette();
-          const macs = (s.espMacs && s.espMacs.length) ? s.espMacs : store.selectedMacs();
-          if (!macs.length) { toast('info', 'Selecione um dispositivo'); return; }
+        canMoveUp: index > 0,
+        canMoveDown: index < scenes.length - 1,
+
+        // A cena guarda um estado por dispositivo, então quem aplica é o
+        // servidor — o cliente não teria como orquestrar modos diferentes.
+        onApply: async (item) => {
           try {
-            const res = await api.sendLed({ espMacs: macs, ...s.color, fadeMs: SCENE_FADE_MS });
-            showResult(res, { actionLabel: `Cena “${s.name}”`, clientsByMac: byMac });
+            const res = await api.applyScene(item.id);
+            showResult(res, { actionLabel: `Cena "${item.name}"`, clientsByMac: byMac });
+            // Reidrata para o controle refletir o que a cena acabou de aplicar.
+            await store.refreshClients().catch(() => {});
+            hydrateFromStore();
           } catch (e) { toast('error', e.message); }
         },
-        onDelete: async (s) => {
-          const ok = await confirmModal({ title: 'Excluir cena?', message: `“${s.name}” será removida.`, confirmText: 'Excluir', danger: true });
+
+        onRename: async (item) => {
+          const name = await promptName('Renomear cena', item.name);
+          if (!name) return;
+          try { await api.renameScene(item.id, name); loadScenes(); }
+          catch (e) { toast('error', e.message); }
+        },
+
+        onMove: async (item, delta) => {
+          const ids = scenes.map((x) => x.id);
+          const from = ids.indexOf(item.id);
+          const to = from + delta;
+          if (to < 0 || to >= ids.length) return;
+          ids.splice(to, 0, ids.splice(from, 1)[0]);
+          try { await api.reorderScenes(ids); loadScenes(); }
+          catch (e) { toast('error', e.message); }
+        },
+
+        onDelete: async (item) => {
+          const ok = await confirmModal({ title: 'Excluir cena?', message: `"${item.name}" será removida.`, confirmText: 'Excluir', danger: true });
           if (!ok) return;
-          try { await api.deleteScene(s.id); toast('success', 'Cena excluída'); loadScenes(); }
+          try { await api.deleteScene(item.id); toast('success', 'Cena excluída'); loadScenes(); }
           catch (e) { toast('error', e.message); }
         }
       }));
     });
   }
 
-  view.querySelector('[data-save]').onclick = () => {
-    const color = control.getColor();
-    const content = node(`
-      <div>
-        <h3 class="text-lg font-semibold">Salvar cena</h3>
-        <p class="mt-1 text-sm muted">Guarda a cor atual e os dispositivos selecionados.</p>
-        <div class="mt-4 flex items-center gap-3">
-          <span class="h-10 w-10 rounded-lg border border-black/10 dark:border-white/10" style="background:rgb(${color.r},${color.g},${color.b})"></span>
-          <input data-name class="field flex-1" placeholder="Nome da cena" maxlength="40" />
-        </div>
-        <div class="mt-5 flex justify-end gap-2">
-          <button data-cancel class="btn-ghost">Cancelar</button>
-          <button data-ok class="btn-primary">Salvar</button>
-        </div>
-      </div>`);
-    const { close } = openModal(content);
-    const input = content.querySelector('[data-name]');
-    setTimeout(() => input.focus(), 50);
-    content.querySelector('[data-cancel]').onclick = close;
-    const save = async () => {
-      const name = input.value.trim();
-      if (!name) { input.focus(); return; }
-      try {
-        await api.saveScene({ name, color: { r: color.r, g: color.g, b: color.b }, espMacs: store.selectedMacs() });
-        toast('success', 'Cena salva');
-        close(); loadScenes();
-      } catch (e) { toast('error', e.message); }
-    };
-    content.querySelector('[data-ok]').onclick = save;
-    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') save(); });
+  // Modal simples de nome, usado por salvar e renomear.
+  function promptName(title, initial = '') {
+    return new Promise((resolve) => {
+      const content = node(`
+        <div>
+          <h3 class="text-lg font-semibold">${title}</h3>
+          <div class="mt-4">
+            <input data-name class="field w-full" placeholder="Nome da cena" maxlength="40" />
+          </div>
+          <div class="mt-5 flex justify-end gap-2">
+            <button data-cancel class="btn-ghost">Cancelar</button>
+            <button data-ok class="btn-primary">Salvar</button>
+          </div>
+        </div>`);
+
+      let settled = false;
+      const finish = (value) => { if (!settled) { settled = true; resolve(value); } };
+      const { close } = openModal(content, { onClose: () => finish(null) });
+
+      const input = content.querySelector('[data-name]');
+      input.value = initial;
+      setTimeout(() => input.focus(), 50);
+
+      const submit = () => {
+        const value = input.value.trim();
+        if (!value) { input.focus(); return; }
+        finish(value);
+        close();
+      };
+
+      content.querySelector('[data-cancel]').onclick = () => { finish(null); close(); };
+      content.querySelector('[data-ok]').onclick = submit;
+      input.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+    });
+  }
+
+  // "Salvar atual" fotografa o que os ESPs estão mostrando de verdade —
+  // efeito, gradiente ou cor, cada um no seu modo — em vez de só a cor do
+  // seletor. Quem sabe o estado é o servidor, então a captura é lá.
+  view.querySelector('[data-save]').onclick = async () => {
+    const macs = store.selectedMacs();
+    if (!macs.length) { toast('info', 'Selecione um dispositivo'); return; }
+
+    const name = await promptName('Salvar cena');
+    if (!name) return;
+
+    try {
+      await api.captureScene({ name, espMacs: macs });
+      toast('success', 'Cena salva');
+      loadScenes();
+    } catch (e) { toast('error', e.message); }
   };
 
   /* ------------------------------ init ------------------------------ */

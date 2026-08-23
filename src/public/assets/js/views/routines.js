@@ -79,7 +79,8 @@ export async function mount(view) {
         <div data-list class="flex flex-col gap-2"></div>
       </section>
 
-      <aside class="card p-5">
+      <aside class="flex flex-col gap-6">
+      <section class="card p-5">
         <h2 class="mb-4 text-sm font-semibold">Nova rotina</h2>
         <div class="flex flex-col gap-3">
           <div>
@@ -140,6 +141,59 @@ export async function mount(view) {
           <p class="text-xs muted">Aplica nos dispositivos selecionados na barra acima.</p>
           <button data-save class="btn-primary w-full">Criar rotina</button>
         </div>
+      </section>
+
+      <section class="card p-5">
+        <div class="mb-1 flex items-center justify-between">
+          <h2 class="text-sm font-semibold">Modo ausente</h2>
+          <label class="flex items-center gap-2 text-xs">
+            <input data-away-enabled type="checkbox" class="accent-indigo-500" />
+            Ativo
+          </label>
+        </div>
+        <p class="mb-4 text-xs muted">Acende e apaga em intervalos sorteados, para a casa não parecer vazia.</p>
+
+        <div class="flex flex-col gap-3">
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <span class="label">Das</span>
+              <input data-away-start type="time" class="field w-full" />
+            </div>
+            <div>
+              <span class="label">Até</span>
+              <input data-away-end type="time" class="field w-full" />
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <span class="label">Aceso (min)</span>
+              <div class="flex items-center gap-1">
+                <input data-away-min-on type="number" min="1" max="240" class="field w-full" />
+                <span class="text-xs muted">a</span>
+                <input data-away-max-on type="number" min="1" max="240" class="field w-full" />
+              </div>
+            </div>
+            <div>
+              <span class="label">Apagado (min)</span>
+              <div class="flex items-center gap-1">
+                <input data-away-min-off type="number" min="1" max="240" class="field w-full" />
+                <span class="text-xs muted">a</span>
+                <input data-away-max-off type="number" min="1" max="240" class="field w-full" />
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <span class="label">Cor</span>
+            <input data-away-color type="color" class="h-9 w-full cursor-pointer rounded border border-black/10 bg-transparent p-0 dark:border-white/10" />
+          </div>
+
+          <p data-away-status class="text-xs muted"></p>
+          <p class="text-xs muted">Usa os dispositivos selecionados na barra acima ao salvar.</p>
+          <button data-away-save class="btn-primary w-full">Salvar modo ausente</button>
+        </div>
+      </section>
       </aside>
     </div>`;
 
@@ -277,9 +331,99 @@ export async function mount(view) {
     } catch (e) { toast('error', e.message); }
   };
 
+  /* --------------------------- modo ausente --------------------------- */
+
+  const away = {
+    enabled: view.querySelector('[data-away-enabled]'),
+    start: view.querySelector('[data-away-start]'),
+    end: view.querySelector('[data-away-end]'),
+    minOn: view.querySelector('[data-away-min-on]'),
+    maxOn: view.querySelector('[data-away-max-on]'),
+    minOff: view.querySelector('[data-away-min-off]'),
+    maxOff: view.querySelector('[data-away-max-off]'),
+    color: view.querySelector('[data-away-color]'),
+    status: view.querySelector('[data-away-status]'),
+    save: view.querySelector('[data-away-save]')
+  };
+
+  function minutesToTime(minutes) {
+    const h = String(Math.floor(minutes / 60)).padStart(2, '0');
+    const m = String(minutes % 60).padStart(2, '0');
+    return `${h}:${m}`;
+  }
+
+  function timeToMinutes(value) {
+    const [h, m] = String(value || '0:0').split(':').map(Number);
+    return (h || 0) * 60 + (m || 0);
+  }
+
+  function renderAway(config) {
+    away.enabled.checked = !!config.enabled;
+    away.start.value = minutesToTime(config.startMinutes);
+    away.end.value = minutesToTime(config.endMinutes);
+    away.minOn.value = config.minOnMin;
+    away.maxOn.value = config.maxOnMin;
+    away.minOff.value = config.minOffMin;
+    away.maxOff.value = config.maxOffMin;
+    away.color.value = rgbToHex(config.color);
+
+    if (!config.enabled) {
+      away.status.textContent = 'Desativado.';
+      return;
+    }
+
+    const byMac = Object.fromEntries(store.clients.map((c) => [c.espMac, c]));
+    const names = (config.espMacs || []).map((mac) => byMac[mac]?.nickname || mac).join(', ');
+
+    if (!config.windowActive) {
+      away.status.textContent = `Ativo em ${names || 'nenhum dispositivo'}, mas fora da janela agora.`;
+      return;
+    }
+
+    const on = (config.devices || []).filter((d) => d.on).length;
+    away.status.textContent = `Dentro da janela · ${on} de ${(config.espMacs || []).length} aceso(s) · ${names}`;
+  }
+
+  async function loadAway() {
+    try { renderAway(await api.getAway()); }
+    catch (e) { toast('error', e.message); }
+  }
+
+  away.save.onclick = async () => {
+    const espMacs = store.selectedMacs();
+    if (away.enabled.checked && !espMacs.length) {
+      toast('info', 'Selecione ao menos um dispositivo');
+      return;
+    }
+
+    try {
+      const saved = await api.saveAway({
+        enabled: away.enabled.checked,
+        espMacs,
+        startMinutes: timeToMinutes(away.start.value),
+        endMinutes: timeToMinutes(away.end.value),
+        minOnMin: Number(away.minOn.value),
+        maxOnMin: Number(away.maxOn.value),
+        minOffMin: Number(away.minOff.value),
+        maxOffMin: Number(away.maxOff.value),
+        color: hexToRgb(away.color.value)
+      });
+      renderAway(saved);
+      toast('success', away.enabled.checked ? 'Modo ausente ativado' : 'Modo ausente desativado');
+    } catch (e) { toast('error', e.message); }
+  };
+
   await store.refreshClients().catch(() => {});
   load();
+  loadAway();
 
-  const offs = [store.on('clients', load)];
-  return () => offs.forEach((off) => off());
+  // O estado do modo ausente muda no servidor a cada tick; atualiza de tempos
+  // em tempos para o painel não ficar mentindo.
+  const awayTimer = setInterval(loadAway, 30000);
+
+  const offs = [store.on('clients', () => { load(); loadAway(); })];
+  return () => {
+    clearInterval(awayTimer);
+    offs.forEach((off) => off());
+  };
 }
