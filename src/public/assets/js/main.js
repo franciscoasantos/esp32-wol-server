@@ -8,12 +8,14 @@ import { initDeviceBar } from './components/deviceSelector.js';
 import * as dashboard from './views/dashboard.js';
 import * as led from './views/led.js';
 import * as wol from './views/wol.js';
+import * as routines from './views/routines.js';
 import * as devices from './views/devices.js';
 
 const NAV = [
   { path: '/', label: 'Dashboard', icon: 'dashboard' },
   { path: '/led', label: 'LED', icon: 'led' },
   { path: '/wol', label: 'Wake-on-LAN', short: 'WoL', icon: 'wol' },
+  { path: '/routines', label: 'Rotinas', icon: 'clock' },
   { path: '/devices', label: 'Dispositivos', short: 'Disp.', icon: 'devices' }
 ];
 
@@ -21,6 +23,7 @@ const ROUTES = {
   '/': { title: 'Dashboard', deviceBar: false, mount: dashboard.mount },
   '/led': { title: 'Controle de LED', deviceBar: true, mount: led.mount },
   '/wol': { title: 'Wake-on-LAN', deviceBar: true, mount: wol.mount },
+  '/routines': { title: 'Rotinas', deviceBar: true, mount: routines.mount },
   '/devices': { title: 'Dispositivos', deviceBar: false, mount: devices.mount }
 };
 

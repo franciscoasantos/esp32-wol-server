@@ -6,7 +6,16 @@ import { router } from '../router.js';
 import { icon, escapeHtml, toast, confirmModal } from '../ui.js';
 import { showResult } from '../components/resultToast.js';
 
-const EFFECT_LABELS = { breathing: 'Respiração', rainbow: 'Arco-íris', fade: 'Transição' };
+const EFFECT_LABELS = {
+  breathing: 'Respiração',
+  rainbow: 'Arco-íris',
+  fade: 'Transição',
+  fire: 'Fogo',
+  comet: 'Cometa',
+  twinkle: 'Estrelas',
+  wave: 'Onda',
+  wipe: 'Preenchimento'
+};
 
 function deviceCard(c) {
   const online = store.isConnected(c.espMac);
