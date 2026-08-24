@@ -2,13 +2,14 @@ const WebSocket = require('ws');
 const logger = require('../utils/logger');
 const { validateHMAC, validateTimestamp } = require('../auth/hmac');
 const { TUNNEL_PORT } = require('../config');
-const { normalizeMac, getClientByMac } = require('../data/clientsStore');
+const { normalizeMac, getClientByMac, setFirmwareVersion } = require('../data/clientsStore');
 
 const clients = new Map();          // espMac → ws
-const clientDetails = new Map();    // espMac → { ip }
+const clientDetails = new Map();    // espMac → { ip, version }
 const pendingResolvers = new Map(); // espMac → (response) => void
 const statusChangeCallbacks = [];
 const stateChangeCallbacks = [];
+const otaCallbacks = [];
 const commandQueues = new Map();
 let tunnelServer = null;
 
@@ -20,11 +21,25 @@ function formatWsPayload(payload) {
 function getConnectedClients() { return Array.from(clients.keys()); }
 
 function getConnectedClientDetails() {
-  return Array.from(clientDetails.entries()).map(([espMac, d]) => ({ espMac, ip: d.ip }));
+  return Array.from(clientDetails.entries()).map(([espMac, d]) => ({
+    espMac,
+    ip: d.ip,
+    version: d.version || null
+  }));
+}
+
+function getFirmwareVersion(espMac) {
+  const normalized = normalizeMac(espMac);
+  return normalized ? (clientDetails.get(normalized)?.version || null) : null;
 }
 
 function onStatusChange(cb) { statusChangeCallbacks.push(cb); }
 function onStateChange(cb) { stateChangeCallbacks.push(cb); }
+function onOtaEvent(cb) { otaCallbacks.push(cb); }
+
+function notifyOtaEvent(espMac, event) {
+  otaCallbacks.forEach((cb) => cb(espMac, event));
+}
 
 function notifyStatusChange() {
   const connected = getConnectedClients();
@@ -137,6 +152,28 @@ function handleStateReport(espMac, payload) {
   notifyStateChange(espMac, { r, g, b, w: w || 0 });
 }
 
+// O firmware manda ota_progress/ota_result por conta própria, sem ninguém ter
+// pedido. Sem tratá-los antes do resolveAndClear, eles resolveriam por engano o
+// comando que estivesse em voo — só existe um resolver por MAC.
+function handleOtaProgress(espMac, payload) {
+  const pct = payload?.pct;
+  if (typeof pct !== 'number' || pct < 0 || pct > 100) return;
+  logger.debug(`[OTA][${espMac}] ${pct}%`);
+  notifyOtaEvent(espMac, { phase: 'downloading', pct });
+}
+
+function handleOtaResult(espMac, payload) {
+  if (payload?.status === 'ok') {
+    logger.info(`[OTA][${espMac}] completed; device is rebooting`);
+    notifyOtaEvent(espMac, { phase: 'rebooting', pct: 100 });
+    return;
+  }
+
+  const error = payload?.error || 'unknown';
+  logger.error(`[OTA][${espMac}] failed: ${error}`);
+  notifyOtaEvent(espMac, { phase: 'error', error });
+}
+
 function normalizeIp(value) {
   if (!value || typeof value !== 'string') return null;
   if (value.startsWith('::ffff:')) return value.slice(7);
@@ -173,14 +210,18 @@ function initializeTunnel() {
         logger.debug(`[WS RX][UNAUTH] ${data}`);
         try {
           const auth = JSON.parse(data);
-          const { token, hmac, mac } = auth;
+          // `version` só existe a partir do firmware com OTA; ausente em
+          // firmwares antigos, que seguem conectando normalmente.
+          const { token, hmac, mac, version } = auth;
           const normalizedMac = normalizeMac(mac);
 
           if (!token || !hmac || !normalizedMac) { logger.error('Missing/invalid token, hmac or mac'); ws.close(); return; }
           if (!validateTimestamp(token)) { logger.error('Invalid or expired timestamp'); ws.close(); return; }
           if (!validateHMAC(token, hmac)) { logger.error('Invalid HMAC'); ws.close(); return; }
 
-          logger.info(`ESP authenticated successfully: ${normalizedMac}`);
+          const firmwareVersion = (typeof version === 'string' && version.trim()) ? version.trim().slice(0, 64) : null;
+
+          logger.info(`ESP authenticated successfully: ${normalizedMac}${firmwareVersion ? ` (firmware ${firmwareVersion})` : ''}`);
           authenticated = true;
           authenticatedMac = normalizedMac;
           clearTimeout(authTimeout);
@@ -189,7 +230,11 @@ function initializeTunnel() {
           if (previousWs && previousWs !== ws) previousWs.close();
 
           clients.set(normalizedMac, ws);
-          clientDetails.set(normalizedMac, { ip: normalizeIp(request?.socket?.remoteAddress) });
+          clientDetails.set(normalizedMac, {
+            ip: normalizeIp(request?.socket?.remoteAddress),
+            version: firmwareVersion
+          });
+          if (firmwareVersion) setFirmwareVersion(normalizedMac, firmwareVersion);
           notifyStatusChange();
 
           pingInterval = setInterval(() => {
@@ -225,6 +270,16 @@ function initializeTunnel() {
         return;
       }
 
+      if (action === 'ota_progress') {
+        handleOtaProgress(authenticatedMac, payload);
+        return;
+      }
+
+      if (action === 'ota_result') {
+        handleOtaResult(authenticatedMac, payload);
+        return;
+      }
+
       // Route to pending command resolver (LED, WoL, etc. responses)
       resolveAndClear(authenticatedMac, payload);
     });
@@ -254,9 +309,11 @@ module.exports = {
   initializeTunnel,
   onStatusChange,
   onStateChange,
+  onOtaEvent,
   isESPConnected,
   getESPWebSocket,
   getConnectedClients,
   getConnectedClientDetails,
+  getFirmwareVersion,
   sendCommandToESP
 };

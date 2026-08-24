@@ -31,11 +31,17 @@ const {
   handleRenameScene,
   handleReorderScenes,
   handleGetAway,
-  handleSaveAway
+  handleSaveAway,
+  handleStartOta
 } = require('./routes/api');
+const {
+  handleFirmwareDownload,
+  handleFirmwareInfo,
+  handleFirmwareUpload
+} = require('./routes/firmware');
 const { handleStatic } = require('./utils/static');
-const { initializeTunnel, onStatusChange, onStateChange } = require('./websocket/espTunnel');
-const { notifyClients, notifyClientState } = require('./utils/sse');
+const { initializeTunnel, onStatusChange, onStateChange, onOtaEvent } = require('./websocket/espTunnel');
+const { notifyClients, notifyClientState, notifyClientOta } = require('./utils/sse');
 const { setLastLedColor } = require('./data/clientsStore');
 const scheduler = require('./services/scheduler');
 
@@ -54,6 +60,11 @@ onStatusChange((connectedClients) => {
 onStateChange((espMac, color) => {
   setLastLedColor(espMac, { r: color.r, g: color.g, b: color.b });
   notifyClientState(espMac, color);
+});
+
+// Progresso do OTA reportado pelo dispositivo → barra na aba ESP32
+onOtaEvent((espMac, event) => {
+  notifyClientOta(espMac, event);
 });
 
 // HTTP Server
@@ -75,6 +86,13 @@ const httpServer = http.createServer((req, res) => {
   // STATIC ASSETS (public — JS/CSS do SPA)
   if (req.url.startsWith("/assets/") && req.method === "GET") {
     return handleStatic(req, res);
+  }
+
+  // FIRMWARE OTA — o ESP32 não tem cookie JWT, então precisa vir antes da
+  // checagem de sessão; sob a rota protegida ele baixaria o HTML de /login no
+  // lugar do binário. A autenticação é o HMAC do túnel, validada no handler.
+  if (req.url.startsWith("/firmware/latest.bin") && (req.method === "GET" || req.method === "HEAD")) {
+    return handleFirmwareDownload(req, res);
   }
 
   // PWA: manifest e service worker precisam ser públicos e servidos na raiz (escopo /).
@@ -109,6 +127,20 @@ const httpServer = http.createServer((req, res) => {
   // Mantém /config e /wol-targets como aliases para deep-links antigos.
   if (req.method === "GET" && ["/", "/led", "/wol", "/routines", "/devices", "/config", "/wol-targets"].includes(req.url)) {
     return handleAppShell(req, res);
+  }
+
+  // FIRMWARE OTA (painel) — manifesto, publicação e disparo do update.
+  if (req.url === "/api/firmware" && req.method === "GET") {
+    return handleFirmwareInfo(req, res);
+  }
+
+  if (req.url === "/api/firmware" && req.method === "POST") {
+    return handleFirmwareUpload(req, res);
+  }
+
+  if (req.url.startsWith("/api/clients/") && req.url.endsWith("/ota") && req.method === "POST") {
+    const espMac = decodeURIComponent(req.url.slice("/api/clients/".length, -"/ota".length));
+    return handleStartOta(req, res, espMac);
   }
 
   // CLIENTS API
