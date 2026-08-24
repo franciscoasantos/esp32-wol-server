@@ -32,7 +32,8 @@ Este sistema funciona como um servidor intermediário (tunnel) que:
 - **Despertador nascer-do-sol**: rampa de vermelho profundo até branco quente ao longo de N minutos
 - **Ritual de Wake-on-LAN**: manda o pacote mágico e usa a fita como barra de progresso enquanto sonda o alvo — verde quando ele acorda, vermelho no timeout, e a fita volta ao que estava
 - **LED como notificação**: `POST /api/notify` pisca uma cor e restaura o estado anterior
-- **Atualizações em tempo real (SSE)**: eventos `status` (conexão), `state` (cor ao vivo) e `effect` (efeito ativo)
+- **Atualização de firmware pelo ar (OTA)**: envie o `.bin` pela aba ESP32 e atualize cada dispositivo pela rede, com barra de progresso. O ESP32 só precisa de cabo uma vez, para gravar a tabela de partições A/B. Se a imagem nova não conseguir falar com o servidor em 5 minutos, o dispositivo volta sozinho para a anterior
+- **Atualizações em tempo real (SSE)**: eventos `status` (conexão), `state` (cor ao vivo), `effect` (efeito ativo) e `ota` (progresso do update)
 - **Descoberta de ESP não cadastrado**: Lista com MAC + IP na tela de dispositivos
 - **Interface SPA**: navegação sem reload, seletor global de dispositivos persistente, tema escuro/claro
 - **Logs de debug WS**: mensagens enviadas/recebidas no túnel para diagnóstico
@@ -74,6 +75,11 @@ HTTP_PORT=9000
 # Sem elas, só gatilhos de horário fixo funcionam (e o log avisa no boot).
 LATITUDE=-23.5505
 LONGITUDE=-46.6333
+
+# Base pública usada para montar a URL de download do firmware no OTA.
+# Precisa ser alcançável pelo ESP32 de fora da LAN — a mesma que atende o wss://.
+# Sem ela o botão "Atualizar" da aba ESP32 responde erro.
+PUBLIC_BASE_URL=https://wol.exemplo.net
 ```
 
 ## ▶️ Executando o Servidor
@@ -114,7 +120,8 @@ Logo após conectar no WebSocket, o ESP deve enviar:
 {
   "token": "esp32-1234567890",
   "hmac": "abc123...",
-  "mac": "7C:87:CE:28:09:68"
+  "mac": "7C:87:CE:28:09:68",
+  "version": "v1.0.0"
 }
 ```
 
@@ -123,6 +130,9 @@ Regras:
 - `hmac` = SHA256(token, HMAC_SECRET)
 - `mac` obrigatório (identificador do cliente)
 - timestamp com janela de validação de 5 minutos
+- `version` opcional — versão do firmware em execução, usada pela aba ESP32 para
+  marcar dispositivos desatualizados. Firmwares anteriores ao OTA não mandam o
+  campo e seguem conectando normalmente
 
 ### 2) Solicitar configuração após autenticação
 
@@ -215,6 +225,29 @@ Resposta de erro:
 | `wave` | Duas senoides somadas | sim | número de cristas |
 | `wipe` | Preenche a fita e recomeça | sim | suavidade da borda |
 
+#### Atualização de firmware (OTA)
+
+```json
+{
+  "action": "ota",
+  "url": "https://wol.exemplo.net/firmware/latest.bin?token=esp32-...&hmac=...",
+  "version": "v1.1.0",
+  "size": 962928,
+  "sha256": "b95cea..."
+}
+```
+
+- A URL é montada pelo servidor e já vem assinada com o `HMAC_SECRET`; a janela
+  de ±5 min do token faz o link expirar sozinho
+- O ESP responde na hora com `{"status":"ok","action":"ota","state":"started"}` —
+  isso confirma só o **aceite**, não o fim do flash
+- Recusas vêm como `{"status":"error","action":"ota","message":"..."}`, sendo os
+  motivos mais comuns `already_on_this_version` e `ota_already_running`. Mande
+  `"force": true` para reinstalar a mesma versão
+- Integridade não depende do `sha256` do comando: o `esp_https_ota_finish()`
+  confere o SHA-256 que o próprio ESP-IDF anexa à imagem. O campo serve para a UI
+  identificar a build
+
 ### 4) Resposta do ESP
 
 Exemplo esperado:
@@ -235,6 +268,21 @@ Para efeito:
   "effect": "breathing"
 }
 ```
+
+### 5) Mensagens espontâneas do ESP
+
+Além dos ACKs, o dispositivo emite mensagens sem ninguém ter pedido. Elas são
+tratadas **antes** do resolver de comando em voo (`espTunnel.js`) — se caíssem no
+`resolveAndClear`, resolveriam por engano o comando que estivesse aguardando
+resposta, já que só existe um resolver por MAC.
+
+| Mensagem | Quando |
+|---|---|
+| `{"action":"get_config"}` | logo após autenticar |
+| `{"action":"state_report","r":..,"g":..,"b":..,"w":..}` | ao aplicar a config do servidor |
+| `{"action":"ota_progress","pct":45}` | a cada ~5% durante o download do firmware |
+| `{"action":"ota_result","status":"ok"}` | download validado; o ESP reinicia em seguida |
+| `{"action":"ota_result","status":"error","error":"..."}` | falha no OTA; a fita volta ao normal |
 
 ## 🌐 Uso da interface
 
@@ -259,7 +307,26 @@ A interface é uma SPA (single-page app) servida em todas as rotas de página; a
 - **LED**: seletor de cor (anel de matiz + quadrado saturação/valor) que aplica ao vivo nos selecionados; favoritos rápidos; **efeitos** com iniciar/parar e sliders de velocidade e intensidade (o rótulo da intensidade muda conforme o efeito); **cenas** com preview de cor e aplicação em 1 toque
 - **LED (RGBW)**: quando houver ESP SK6812 selecionado, aparece o controle do canal branco (`w`)
 - **WoL**: lista de alvos pesquisável; dispara via ESPs selecionados com feedback por dispositivo
-- **Dispositivos**: cadastro por MAC do ESP, apelido, `ledCount`, `ledPin` e `ledType` (`ws2812b`/`sk6812`); ESPs descobertos aparecem com botão "Registrar" (fluxo guiado); gerenciamento de alvos WoL na mesma tela
+- **Dispositivos**: cadastro por MAC do ESP, apelido, `ledCount`, `ledPin` e `ledType` (`ws2812b`/`sk6812`); ESPs descobertos aparecem com botão "Registrar" (fluxo guiado); gerenciamento de alvos WoL na mesma tela. A aba ESP32 traz também o firmware publicado, o envio de um `.bin` novo e o botão **Atualizar** por dispositivo
+
+### Atualizando o firmware pelo ar
+
+Pré-requisito, uma única vez por dispositivo: gravar por cabo um firmware com a
+tabela de partições A/B (ver o README do `esp32-wol-client`). Sem `otadata` e
+sem um segundo slot, o bootloader não tem para onde instalar a imagem nova.
+
+Depois disso, o ciclo é todo remoto:
+
+1. `idf.py build` no repositório do firmware
+2. Aba **Dispositivos → ESP32 → Enviar .bin**, escolhendo
+   `build/esp32-wol-client.bin`. O servidor lê a versão do próprio binário
+3. Os dispositivos com versão diferente ganham o selo *desatualizado*
+4. **Atualizar** no dispositivo desejado — a fita apaga, a barra acompanha o
+   download e o ESP reinicia sozinho
+
+Se a imagem nova subir mas não conseguir autenticar no túnel em 5 minutos, o
+dispositivo reverte para a anterior por conta própria. Vale exercitar isso uma
+vez, de propósito, antes de confiar o processo a um ESP de difícil acesso.
 
 ## 🔗 API Endpoints
 
@@ -282,11 +349,18 @@ O cookie `token` é `HttpOnly; Path=/; Max-Age=30d; SameSite=Lax`, e ganha `Secu
   - `event: status` → `{ "connected": true, "connectedClients": ["7C:87:CE:28:09:68"] }`
   - `event: state` → `{ "espMac": "...", "r": 255, "g": 0, "b": 0, "w": 0, "pattern": {...} }` (cor ao vivo; `pattern` acompanha para a prévia mostrar gradiente/segmentos)
   - `event: effect` → `{ "espMac": "...", "effect": "breathing" }` (ou `"effect": null` quando interrompido). Emitido só em mudança real — toda cor sólida interrompe efeito, e um arraste no seletor viraria ~7 eventos/s
+  - `event: ota` → `{ "espMac": "...", "phase": "downloading", "pct": 45 }`; `phase` é `downloading`, `rebooting` ou `error` (com `error`)
 
 ### Clientes ESP
-- `GET /api/clients` — inclui `connected`, `lastLedColor`, `lastPattern` e `activeEffect` por dispositivo
+- `GET /api/clients` — inclui `connected`, `lastLedColor`, `lastPattern`, `activeEffect` e `firmwareVersion` por dispositivo
 - `POST /api/clients`
 - `GET /api/clients/discovered`
+- `POST /api/clients/{mac}/ota` — dispara a atualização de firmware. Responde `202` assim que o ESP aceita o comando; o progresso chega pelo evento SSE `ota`. Body opcional `{ "force": true }` reinstala a mesma versão
+
+### Firmware (OTA)
+- `GET /api/firmware` — manifesto do firmware publicado (`{ published: false }` se não houver)
+- `POST /api/firmware` — publica um `.bin`. O corpo é o **arquivo cru** (`Content-Type: application/octet-stream`), sem multipart. O servidor valida que é mesmo uma imagem de app ESP32 e extrai versão, nome do projeto e versão do IDF do próprio binário
+- `GET /firmware/latest.bin?token=&hmac=` — **rota pública**, autenticada pelo mesmo HMAC do túnel (o ESP32 não tem cookie JWT). Fica acima da checagem de sessão em `server.js`, senão o dispositivo baixaria o HTML de `/login` no lugar do binário
 
 ### Alvos WoL
 - `GET /api/wol-targets`
@@ -522,6 +596,7 @@ esp32-wol-server/
 │   │   └── hmac.js
 │   ├── routes/
 │   │   ├── auth.js
+│   │   ├── firmware.js           # download do .bin (HMAC) + upload/manifesto (JWT)
 │   │   └── api.js                # endpoints REST/SSE + comandos + cenas + rotinas
 │   ├── services/                 # regras que não dependem de HTTP
 │   │   ├── ledService.js         # comandos de LED (usado pelas rotas E pela automação)
@@ -530,7 +605,8 @@ esp32-wol-server/
 │   │   ├── notify.js             # pulso + restauração
 │   │   ├── sceneService.js       # aplicar e capturar cenas
 │   │   ├── awayMode.js           # presença simulada
-│   │   └── wakeRitual.js         # WoL + sondagem + barra de progresso
+│   │   ├── wakeRitual.js         # WoL + sondagem + barra de progresso
+│   │   └── otaService.js         # monta a URL assinada e dispara o update
 │   ├── websocket/
 │   │   └── espTunnel.js
 │   ├── data/
@@ -543,11 +619,12 @@ esp32-wol-server/
 │   │   ├── schedulesStore.js
 │   │   ├── schedules.json
 │   │   ├── awayStore.js
-│   │   └── away.json
+│   │   ├── away.json
+│   │   └── firmwareStore.js      # manifesto + parser do cabeçalho da imagem ESP32
 │   ├── utils/
 │   │   ├── logger.js
 │   │   ├── solar.js              # nascer/pôr do sol (NOAA, sem dependência)
-│   │   ├── sse.js                # eventos status/state/effect
+│   │   ├── sse.js                # eventos status/state/effect/ota
 │   │   └── static.js             # serve /assets/* de src/public
 │   ├── views/
 │   │   └── index.js              # carrega o shell (public/index.html) e o login
@@ -577,6 +654,12 @@ esp32-wol-server/
 - Gere `JWT_SECRET` aleatório
 - Use o mesmo `HMAC_SECRET` no servidor e no firmware ESP
 - Em produção, prefira HTTPS/WSS
+- **O binário de firmware é material sensível.** Como `main/config.h` é compilado
+  junto, o `.bin` carrega `WIFI_PASS` e o `SECRET` do HMAC como strings literais —
+  quem baixar o arquivo tem as duas coisas. Por isso `GET /firmware/latest.bin`
+  exige HMAC e o diretório `firmware/` está no `.gitignore`. A correção de fundo
+  (ainda não feita) é mover essas credenciais do `config.h` para a NVS, o que
+  tornaria o binário não-sensível
 
 ## 🐛 Troubleshooting
 
@@ -597,6 +680,20 @@ esp32-wol-server/
 - Timestamp do ESP não pode ter mais de 5 minutos de diferença
 - Verifique logs do servidor: "Invalid HMAC" ou "Invalid timestamp"
 - Certifique-se de que o ESP está enviando o JSON de autenticação logo após conectar
+
+### Atualização OTA falha
+- `PUBLIC_BASE_URL não configurado no .env` — o ESP precisa de uma URL alcançável
+  de fora; `localhost:9000` não serve
+- `already_on_this_version` — o dispositivo já roda a versão publicada. Sem tags
+  no repositório do firmware o `git describe` gera algo como `2b66a78-dirty`, que
+  não muda entre builds sujos; use tags anotadas (`git tag -a v1.1.0`)
+- `Imagem maior que o slot OTA` — o `.bin` não cabe na partição; confira o
+  `binary size` na saída do `idf.py build`
+- Barra trava em 0% — provavelmente o download não tem `Content-Length` (proxy
+  reescrevendo a resposta). O update em si continua funcionando, só sem progresso
+- Dispositivo volta sozinho para a versão antiga depois de ~5 min — é o rollback
+  fazendo o trabalho dele: a imagem nova subiu mas não conseguiu autenticar no
+  túnel. Veja os logs do servidor para o motivo (HMAC, NTP, WiFi)
 
 ### Comando Wake-on-LAN não funciona
 - Verifique se o dispositivo alvo suporta Wake-on-LAN
