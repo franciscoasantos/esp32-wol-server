@@ -17,3 +17,7 @@ Thumbs.db
 .idea/
 *.swp
 *.swo
+
+# Firmware publicado para OTA (binário + manifesto).
+# O .bin carrega WIFI_PASS e o SECRET do HMAC compilados dentro dele.
+firmware/

@@ -27,7 +27,37 @@ async function req(method, url, body) {
   return data || {};
 }
 
+// Upload do .bin como corpo cru (o servidor não tem parser multipart).
+// Via XHR e não fetch porque só o XHR expõe progresso de upload, e ~1 MB numa
+// conexão doméstica demora o suficiente para a barra fazer diferença.
+function uploadFirmware(file, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/firmware');
+    xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && onProgress) onProgress(Math.round((e.loaded / e.total) * 100));
+    };
+
+    xhr.onload = () => {
+      let data = null;
+      try { data = JSON.parse(xhr.responseText); } catch (e) {}
+      if (xhr.status >= 200 && xhr.status < 300) resolve(data || {});
+      else reject(new Error((data && data.error) || `Erro ${xhr.status}`));
+    };
+
+    xhr.onerror = () => reject(new Error('Falha de rede no upload'));
+    xhr.send(file);
+  });
+}
+
 export const api = {
+  // Firmware / OTA
+  getFirmware: () => req('GET', '/api/firmware'),
+  uploadFirmware,
+  startOta: (mac, force) => req('POST', `/api/clients/${encodeURIComponent(mac)}/ota`, force ? { force: true } : {}),
+
   // ESP clients
   getClients: () => req('GET', '/api/clients').then((d) => d.clients || []),
   getDiscovered: () => req('GET', '/api/clients/discovered').then((d) => d.discovered || []),

@@ -222,6 +222,29 @@ function setLastPattern(espMac, pattern, representativeColor) {
   return client;
 }
 
+
+// Versão de firmware reportada pelo ESP no handshake. Fica no mesmo arquivo
+// dos demais dados do dispositivo para a UI poder comparar com o manifesto do
+// firmware publicado mesmo enquanto o ESP está offline.
+function setFirmwareVersion(espMac, version) {
+  const normalized = normalizeMac(espMac);
+  if (!normalized) return null;
+  if (typeof version !== 'string' || !version.trim()) return null;
+
+  const store = loadStore();
+  const client = store.clients.find((item) => item.espMac === normalized);
+  if (!client) return null;
+
+  const next = version.trim().slice(0, 64);
+  if (client.firmwareVersion === next) return client;
+
+  client.firmwareVersion = next;
+  client.updatedAt = new Date().toISOString();
+  scheduleSave(store);
+
+  return client;
+}
+
 module.exports = {
   normalizeMac,
   getClients,
@@ -229,5 +252,6 @@ module.exports = {
   upsertClient,
   setLastLedColor,
   setLastPattern,
+  setFirmwareVersion,
   flushPendingWrites
 };

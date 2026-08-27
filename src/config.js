@@ -12,6 +12,11 @@ module.exports = {
   LOGIN_PASS: process.env.LOGIN_PASS,
   TUNNEL_PORT: process.env.TUNNEL_PORT,
   HTTP_PORT: process.env.HTTP_PORT,
+  // Base pública (ex.: https://wol.exemplo.net) usada para montar a URL de
+  // download do firmware que o ESP32 recebe no comando de OTA. Sem ela o
+  // update fica indisponível — o dispositivo precisa de uma URL alcançável de
+  // fora, não do host:porta interno.
+  PUBLIC_BASE_URL: process.env.PUBLIC_BASE_URL,
   // Coordenadas para os gatilhos de nascer/pôr do sol. Sem elas, rotinas
   // desse tipo simplesmente não disparam (as de horário fixo continuam).
   LATITUDE: toFloat(process.env.LATITUDE),

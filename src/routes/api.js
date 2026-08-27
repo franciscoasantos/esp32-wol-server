@@ -12,7 +12,8 @@ const {
 const {
   isESPConnected,
   getConnectedClients,
-  getConnectedClientDetails
+  getConnectedClientDetails,
+  getFirmwareVersion
 } = require('../websocket/espTunnel');
 const {
   getActiveEffect,
@@ -28,6 +29,7 @@ const { applyScene, captureDevices } = require('../services/sceneService');
 const wakeRitual = require('../services/wakeRitual');
 const { pulse } = require('../services/notify');
 const { getSchedules, upsertSchedule, deleteSchedule } = require('../data/schedulesStore');
+const { startUpdate } = require('../services/otaService');
 const { describeToday, runAction } = require('../services/scheduler');
 const sunrise = require('../services/sunrise');
 
@@ -64,7 +66,10 @@ function getClientsWithStatus() {
   return getClients().map((client) => ({
     ...client,
     connected: connected.has(client.espMac),
-    activeEffect: getActiveEffect(client.espMac)
+    activeEffect: getActiveEffect(client.espMac),
+    // A versão viva do handshake ganha da persistida: depois de um OTA o
+    // arquivo pode estar um passo atrás até o próximo save com debounce.
+    firmwareVersion: getFirmwareVersion(client.espMac) || client.firmwareVersion || null
   }));
 }
 
@@ -600,6 +605,27 @@ async function handleSaveAway(req, res) {
     return sendJson(res, status, { error: error.message });
   }
 }
+
+// POST /api/clients/{mac}/ota — dispara o update no dispositivo. Responde 202
+// assim que o ESP aceita o comando: o flash leva ~1 min e o progresso chega
+// depois pelo evento SSE `ota`.
+async function handleStartOta(req, res, espMac) {
+  const normalized = normalizeMac(espMac);
+  if (!normalized) return sendJson(res, 400, { error: 'MAC inválido' });
+
+  let body = {};
+  try {
+    body = await parseJsonBody(req);
+  } catch (_e) {
+    // Corpo é opcional; só carrega o `force`.
+  }
+
+  const result = await startUpdate(normalized, { force: body?.force === true });
+  if (!result.ok) return sendJson(res, 409, { error: result.error });
+
+  return sendJson(res, 202, { started: true, version: result.version });
+}
+
 module.exports = {
   handleAppShell,
   handleStatus,
@@ -628,5 +654,6 @@ module.exports = {
   handleRenameScene,
   handleReorderScenes,
   handleGetAway,
-  handleSaveAway
+  handleSaveAway,
+  handleStartOta
 };

@@ -35,10 +35,21 @@ function notifyClientEffect(espMac, effect) {
   });
 }
 
+// Progresso do OTA. `phase` é downloading | rebooting | error; durante o flash
+// o ESP some da rede por ~30 s, então a UI precisa distinguir "reiniciando" de
+// "caiu" para não assustar quem está olhando.
+function notifyClientOta(espMac, event) {
+  const payload = JSON.stringify({ espMac, ...event });
+  sseClients.forEach((client) => {
+    client.write(`event: ota\ndata: ${payload}\n\n`);
+  });
+}
+
 module.exports = {
   addClient,
   removeClient,
   notifyClients,
   notifyClientState,
-  notifyClientEffect
+  notifyClientEffect,
+  notifyClientOta
 };
