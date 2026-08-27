@@ -32,7 +32,7 @@ Este sistema funciona como um servidor intermediário (tunnel) que:
 - **Despertador nascer-do-sol**: rampa de vermelho profundo até branco quente ao longo de N minutos
 - **Ritual de Wake-on-LAN**: manda o pacote mágico e usa a fita como barra de progresso enquanto sonda o alvo — verde quando ele acorda, vermelho no timeout, e a fita volta ao que estava
 - **LED como notificação**: `POST /api/notify` pisca uma cor e restaura o estado anterior
-- **Atualização de firmware pelo ar (OTA)**: envie o `.bin` pela aba ESP32 e atualize cada dispositivo pela rede, com barra de progresso. O ESP32 só precisa de cabo uma vez, para gravar a tabela de partições A/B. Se a imagem nova não conseguir falar com o servidor em 5 minutos, o dispositivo volta sozinho para a anterior
+- **Atualização de firmware pelo ar (OTA)**: envie o `.bin` pela aba ESP32 e atualize cada dispositivo pela rede, com barra de progresso. O ESP32 só precisa de cabo uma vez, para gravar a tabela de partições A/B. Se a imagem nova não conseguir falar com o servidor em 2 minutos, o dispositivo volta sozinho para a anterior
 - **Atualizações em tempo real (SSE)**: eventos `status` (conexão), `state` (cor ao vivo), `effect` (efeito ativo) e `ota` (progresso do update)
 - **Descoberta de ESP não cadastrado**: Lista com MAC + IP na tela de dispositivos
 - **Interface SPA**: navegação sem reload, seletor global de dispositivos persistente, tema escuro/claro
@@ -324,7 +324,7 @@ Depois disso, o ciclo é todo remoto:
 4. **Atualizar** no dispositivo desejado — a fita apaga, a barra acompanha o
    download e o ESP reinicia sozinho
 
-Se a imagem nova subir mas não conseguir autenticar no túnel em 5 minutos, o
+Se a imagem nova subir mas não conseguir autenticar no túnel em 2 minutos, o
 dispositivo reverte para a anterior por conta própria. Vale exercitar isso uma
 vez, de propósito, antes de confiar o processo a um ESP de difícil acesso.
 
@@ -691,7 +691,7 @@ esp32-wol-server/
   `binary size` na saída do `idf.py build`
 - Barra trava em 0% — provavelmente o download não tem `Content-Length` (proxy
   reescrevendo a resposta). O update em si continua funcionando, só sem progresso
-- Dispositivo volta sozinho para a versão antiga depois de ~5 min — é o rollback
+- Dispositivo volta sozinho para a versão antiga depois de ~2 min — é o rollback
   fazendo o trabalho dele: a imagem nova subiu mas não conseguiu autenticar no
   túnel. Veja os logs do servidor para o motivo (HMAC, NTP, WiFi)
 
