@@ -40,7 +40,7 @@ Este sistema funciona como um servidor intermediário (tunnel) que:
 1. Clone o repositório:
 ```bash
 git clone <url-do-repositorio>
-cd esp32-wol-server
+cd espnest-server
 ```
 
 2. Instale as dependências:
@@ -356,7 +356,7 @@ Observações para `POST /led`:
 ## 📁 Estrutura do Projeto
 
 ```text
-esp32-wol-server/
+espnest-server/
 ├── src/
 │   ├── server.js                 # HTTP server + roteamento; serve o shell SPA e os assets
 │   ├── config.js
