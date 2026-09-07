@@ -79,7 +79,7 @@ LONGITUDE=-46.6333
 # Base pública usada para montar a URL de download do firmware no OTA.
 # Precisa ser alcançável pelo ESP32 de fora da LAN — a mesma que atende o wss://.
 # Sem ela o botão "Atualizar" da aba ESP32 responde erro.
-PUBLIC_BASE_URL=https://wol.exemplo.net
+PUBLIC_BASE_URL=https://espnest.exemplo.net
 ```
 
 ## ▶️ Executando o Servidor
@@ -230,7 +230,7 @@ Resposta de erro:
 ```json
 {
   "action": "ota",
-  "url": "https://wol.exemplo.net/firmware/latest.bin?token=esp32-...&hmac=...",
+  "url": "https://espnest.exemplo.net/firmware/latest.bin?token=esp32-...&hmac=...",
   "version": "v1.1.0",
   "size": 962928,
   "sha256": "b95cea..."
