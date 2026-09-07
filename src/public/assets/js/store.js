@@ -1,5 +1,5 @@
 // Estado central do app + ponte SSE. Views se inscrevem via store.on(evt, cb).
-// Eventos: 'clients', 'status', 'state', 'selection'.
+// Eventos: 'clients', 'status', 'state', 'effect', 'ota', 'selection'.
 
 import { api } from './api.js';
 
@@ -11,7 +11,9 @@ const state = {
   clients: [],                 // [{ espMac, nickname, ledCount, ledPin, ledType, lastLedColor, connected, activeEffect }]
   connected: new Set(),        // macs online (via SSE)
   liveColors: new Map(),       // mac -> { r, g, b, w }
-  effects: new Map(),          // mac -> 'breathing' | 'rainbow' | 'fade' (efeito ativo)
+  effects: new Map(),          // mac -> nome do efeito ativo (ver EFFECTS em views/led.js)
+  ota: new Map(),              // mac -> { phase, pct, error } durante um update
+
   selection: new Set(),        // macs selecionados (persistido)
   sseReady: false
 };
@@ -39,6 +41,15 @@ export const store = {
   // Efeito ativo de um cliente (ou null se cor sólida)
   effectOf(mac) {
     return state.effects.get(mac) || null;
+  },
+  // Estado do OTA em curso (ou null). Some sozinho quando o ESP volta online.
+  otaOf(mac) {
+    return state.ota.get(mac) || null;
+  },
+  setOta(mac, value) {
+    if (value) state.ota.set(mac, value);
+    else state.ota.delete(mac);
+    emit('ota', { espMac: mac, ota: value || null });
   },
   // Cor "atual" de um cliente: a ao vivo (SSE) tem prioridade sobre a salva.
   colorOf(mac) {
@@ -123,8 +134,20 @@ export const store = {
         const color = { r: d.r | 0, g: d.g | 0, b: d.b | 0, w: d.w | 0 };
         state.liveColors.set(d.espMac, color);
         const c = state.clients.find((x) => x.espMac === d.espMac);
-        if (c) c.lastLedColor = { r: color.r, g: color.g, b: color.b };
+        if (c) {
+          c.lastLedColor = { r: color.r, g: color.g, b: color.b };
+          if (d.pattern) c.lastPattern = d.pattern;
+        }
         emit('state', { espMac: d.espMac, color });
+      } catch (e) {}
+    });
+
+    es.addEventListener('ota', (ev) => {
+      try {
+        const d = JSON.parse(ev.data);
+        if (!d.espMac) return;
+        state.ota.set(d.espMac, { phase: d.phase, pct: d.pct ?? null, error: d.error || null });
+        emit('ota', { espMac: d.espMac, ota: state.ota.get(d.espMac) });
       } catch (e) {}
     });
 

@@ -1,0 +1,15 @@
+{
+  "enabled": false,
+  "espMacs": [],
+  "startMinutes": 1080,
+  "endMinutes": 1410,
+  "minOnMin": 12,
+  "maxOnMin": 45,
+  "minOffMin": 8,
+  "maxOffMin": 30,
+  "color": {
+    "r": 255,
+    "g": 170,
+    "b": 90
+  }
+}

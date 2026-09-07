@@ -1,5 +1,5 @@
 // Seletor de cor "clássico": anel de matiz (externo) + quadrado de
-// saturação/valor (interno), com slider de brilho, branco opcional e hex.
+// saturação/valor (interno), com branco opcional e hex.
 // Portado do seletor antigo. API pública estável:
 //   createColorControl(container, { onChange, hasWhite })
 //   -> { getColor, setColor, setWhiteEnabled, destroy }
@@ -233,7 +233,12 @@ export function createColorControl(container, { onChange, hasWhite = false } = {
       syncUI();
       if (!silent && onChange) onChange(color());
     },
-    setWhiteEnabled(enabled) { whiteWrap.classList.toggle('hidden', !enabled); },
+    // Alterna a dimensão de branco de verdade, não só a visibilidade do slider:
+    // é `hasWhite` que decide se `w` entra no objeto devolvido por getColor().
+    setWhiteEnabled(enabled) {
+      hasWhite = !!enabled;
+      whiteWrap.classList.toggle('hidden', !hasWhite);
+    },
     destroy() {
       window.removeEventListener('mousemove', move);
       window.removeEventListener('touchmove', move);
